@@ -2,42 +2,55 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fitness-Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Training</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>🏋️ Fitness-Tracker</h1>
+  <header class="app-header">
+    <p class="eyebrow">Fitness</p>
+    <h1>Dein Training</h1>
   </header>
 
-  <nav class="tabs">
-    <button class="tab-btn active" data-tab="eintragen">Eintragen</button>
-    <button class="tab-btn" data-tab="liste">Liste</button>
-    <button class="tab-btn" data-tab="uebersicht">Übersicht</button>
-  </nav>
-
-  <main>
+  <main class="app-main">
     <section id="eintragen" class="tab-content active">
-      <form id="entry-form">
-        <label for="exercise">Übung</label>
-        <input type="text" id="exercise" placeholder="z. B. Liegestütze, Laufen" required>
+      <form id="entry-form" class="card">
+        <div class="field-group">
+          <label>Übung</label>
+          <div id="exercise-chips" class="chip-row"></div>
+          <input type="text" id="new-exercise-input" class="new-exercise-input hidden" placeholder="Name der neuen Übung" autocomplete="off">
+        </div>
 
-        <label for="reps">Wiederholungen</label>
-        <input type="number" id="reps" min="0" placeholder="z. B. 20">
+        <p id="last-entry-info" class="last-entry-info"></p>
 
-        <label for="distance">Distanz (km)</label>
-        <input type="number" id="distance" min="0" step="0.01" placeholder="z. B. 5">
+        <div class="field-group">
+          <label for="reps">Wiederholungen</label>
+          <div class="stepper">
+            <button type="button" id="reps-minus" class="stepper-btn" aria-label="Weniger Wiederholungen">−</button>
+            <input type="number" id="reps" min="0" value="0" inputmode="numeric">
+            <button type="button" id="reps-plus" class="stepper-btn" aria-label="Mehr Wiederholungen">+</button>
+          </div>
+        </div>
 
-        <label for="duration">Zeit (Minuten)</label>
-        <input type="number" id="duration" min="0" placeholder="z. B. 30">
+        <div class="field-row">
+          <div class="field-group">
+            <label for="distance">Distanz (km)</label>
+            <input type="number" id="distance" min="0" step="0.01" placeholder="0">
+          </div>
+          <div class="field-group">
+            <label for="duration">Zeit (Min.)</label>
+            <input type="number" id="duration" min="0" placeholder="0">
+          </div>
+        </div>
 
-        <label for="date">Datum</label>
-        <input type="date" id="date" required>
+        <div class="field-group">
+          <label for="date">Datum</label>
+          <input type="date" id="date" required>
+        </div>
 
-        <button type="submit">Speichern</button>
+        <button type="submit" class="save-btn">Speichern</button>
+        <p id="save-feedback" class="feedback" role="status"></p>
       </form>
-      <p id="save-feedback" class="feedback"></p>
     </section>
 
     <section id="liste" class="tab-content">
@@ -47,11 +60,26 @@
     </section>
 
     <section id="uebersicht" class="tab-content">
-      <h2>Wiederholungen pro Woche</h2>
+      <h2>Pro Woche</h2>
       <ul id="weekly-overview"></ul>
       <p id="empty-overview" class="empty-msg">Noch keine Daten für die Übersicht.</p>
     </section>
   </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="eintragen" aria-label="Eintragen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+      <span>Eintragen</span>
+    </button>
+    <button class="nav-btn" data-tab="liste" aria-label="Liste">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+      <span>Liste</span>
+    </button>
+    <button class="nav-btn" data-tab="uebersicht" aria-label="Übersicht">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V10M12 19V5M19 19v-7"/></svg>
+      <span>Übersicht</span>
+    </button>
+  </nav>
 
   <script src="script.js"></script>
 </body>

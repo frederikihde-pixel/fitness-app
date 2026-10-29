@@ -8,7 +8,23 @@ const emptyList = document.getElementById("empty-list");
 const weeklyOverview = document.getElementById("weekly-overview");
 const emptyOverview = document.getElementById("empty-overview");
 
-dateInput.valueAsDate = new Date();
+const chipRow = document.getElementById("exercise-chips");
+const newExerciseInput = document.getElementById("new-exercise-input");
+const lastEntryInfo = document.getElementById("last-entry-info");
+const repsInput = document.getElementById("reps");
+const repsMinus = document.getElementById("reps-minus");
+const repsPlus = document.getElementById("reps-plus");
+const distanceInput = document.getElementById("distance");
+const durationInput = document.getElementById("duration");
+
+let selectedExercise = null;
+let isNewExerciseMode = false;
+
+resetDateToToday();
+
+function resetDateToToday() {
+  dateInput.valueAsDate = new Date();
+}
 
 function loadEntries() {
   try {
@@ -44,6 +60,11 @@ function getIsoWeekKey(dateStr) {
   return `${target.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
 }
 
+function roundTo(value, decimals) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
 function formatEntryDetails(entry) {
   const parts = [];
   if (entry.reps) parts.push(`${entry.reps} Wdh.`);
@@ -51,6 +72,94 @@ function formatEntryDetails(entry) {
   if (entry.duration) parts.push(`${entry.duration} min`);
   return parts.join(" · ") || "Keine weiteren Angaben";
 }
+
+// Returns the most recent entry per exercise, sorted by most recently used first.
+function getExerciseRecency(entries) {
+  const latestByExercise = new Map();
+  for (const entry of entries) {
+    const current = latestByExercise.get(entry.exercise);
+    if (!current || entry.date > current.date || (entry.date === current.date && entry.id > current.id)) {
+      latestByExercise.set(entry.exercise, entry);
+    }
+  }
+  return [...latestByExercise.values()].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+}
+
+function renderChips() {
+  const entries = loadEntries();
+  const recents = getExerciseRecency(entries);
+
+  chipRow.innerHTML = "";
+
+  for (const entry of recents) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    if (entry.exercise === selectedExercise && !isNewExerciseMode) {
+      chip.classList.add("selected");
+    }
+    chip.textContent = entry.exercise;
+    chip.addEventListener("click", () => selectExercise(entry.exercise, recents));
+    chipRow.appendChild(chip);
+  }
+
+  const newChip = document.createElement("button");
+  newChip.type = "button";
+  newChip.className = "chip chip-new";
+  if (isNewExerciseMode) newChip.classList.add("selected");
+  newChip.textContent = "+ Neue Übung";
+  newChip.addEventListener("click", selectNewExercise);
+  chipRow.appendChild(newChip);
+
+  return recents;
+}
+
+function updateLastEntryInfo(entry) {
+  if (!entry) {
+    lastEntryInfo.textContent = "";
+    return;
+  }
+  const dateStr = new Date(entry.date + "T00:00:00").toLocaleDateString("de-DE");
+  lastEntryInfo.textContent = `Zuletzt: ${formatEntryDetails(entry)} · ${dateStr}`;
+}
+
+function selectExercise(name, recents) {
+  selectedExercise = name;
+  isNewExerciseMode = false;
+  newExerciseInput.classList.add("hidden");
+  newExerciseInput.value = "";
+
+  const last = recents.find((entry) => entry.exercise === name);
+  repsInput.value = last?.reps ?? 0;
+  distanceInput.value = last?.distance ?? "";
+  durationInput.value = last?.duration ?? "";
+  updateLastEntryInfo(last);
+
+  renderChips();
+}
+
+function selectNewExercise() {
+  selectedExercise = null;
+  isNewExerciseMode = true;
+  newExerciseInput.classList.remove("hidden");
+  newExerciseInput.value = "";
+  newExerciseInput.focus();
+
+  repsInput.value = 0;
+  distanceInput.value = "";
+  durationInput.value = "";
+  updateLastEntryInfo(null);
+
+  renderChips();
+}
+
+repsMinus.addEventListener("click", () => {
+  repsInput.value = Math.max(0, Number(repsInput.value || 0) - 1);
+});
+
+repsPlus.addEventListener("click", () => {
+  repsInput.value = Number(repsInput.value || 0) + 1;
+});
 
 function renderList() {
   const entries = loadEntries();
@@ -86,8 +195,8 @@ function renderList() {
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "delete-btn";
-    deleteBtn.textContent = "🗑";
     deleteBtn.setAttribute("aria-label", "Eintrag löschen");
+    deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12"/></svg>';
     deleteBtn.addEventListener("click", () => deleteEntry(entry.id));
 
     li.append(main, deleteBtn);
@@ -96,10 +205,11 @@ function renderList() {
 }
 
 function deleteEntry(id) {
-  const entries = loadEntries().filter((e) => e.id !== id);
+  const entries = loadEntries().filter((entry) => entry.id !== id);
   saveEntries(entries);
   renderList();
   renderWeeklyOverview();
+  renderChips();
 }
 
 function renderWeeklyOverview() {
@@ -158,51 +268,64 @@ function renderWeeklyOverview() {
   }
 }
 
-function roundTo(value, decimals) {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
 form.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  const exercise = normalizeExerciseName(document.getElementById("exercise").value);
-  const reps = document.getElementById("reps").value;
-  const distance = document.getElementById("distance").value;
-  const duration = document.getElementById("duration").value;
+  const exerciseName = isNewExerciseMode
+    ? normalizeExerciseName(newExerciseInput.value)
+    : selectedExercise;
   const date = dateInput.value;
 
-  if (!exercise || !date) return;
+  if (!exerciseName || !date) return;
+
+  const reps = Number(repsInput.value) || 0;
+  const distance = distanceInput.value ? Number(distanceInput.value) : null;
+  const duration = durationInput.value ? Number(durationInput.value) : null;
 
   const entries = loadEntries();
-  entries.push({
+  const newEntry = {
     id: Date.now(),
-    exercise,
-    reps: reps ? Number(reps) : null,
-    distance: distance ? Number(distance) : null,
-    duration: duration ? Number(duration) : null,
+    exercise: exerciseName,
+    reps: reps > 0 ? reps : null,
+    distance,
+    duration,
     date,
-  });
+  };
+  entries.push(newEntry);
   saveEntries(entries);
 
-  form.reset();
-  dateInput.valueAsDate = new Date();
+  selectedExercise = exerciseName;
+  isNewExerciseMode = false;
+  newExerciseInput.classList.add("hidden");
+  resetDateToToday();
 
-  feedback.textContent = "Eintrag gespeichert ✅";
+  feedback.textContent = "Eintrag gespeichert";
   setTimeout(() => (feedback.textContent = ""), 2000);
 
+  renderChips();
+  updateLastEntryInfo(newEntry);
   renderList();
   renderWeeklyOverview();
 });
 
-document.querySelectorAll(".tab-btn").forEach((btn) => {
+document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
     document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById(btn.dataset.tab).classList.add("active");
   });
 });
 
-renderList();
-renderWeeklyOverview();
+function init() {
+  const recents = renderChips();
+  if (recents.length > 0) {
+    selectExercise(recents[0].exercise, recents);
+  } else {
+    selectNewExercise();
+  }
+  renderList();
+  renderWeeklyOverview();
+}
+
+init();
