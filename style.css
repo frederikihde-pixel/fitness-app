@@ -351,6 +351,144 @@ h2 {
   padding: 1rem 0;
 }
 
+.chart-card {
+  padding: 1.25rem 1rem 1rem;
+}
+
+.trend-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.chart-dot-current {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.chart-value-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chart-date-label {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
+#best-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+#best-list li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.best-label {
+  font-weight: 600;
+}
+
+.best-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+}
+
+.best-value {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.best-date {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.compare-card {
+  padding: 1.25rem 1.5rem;
+  gap: 0.9rem;
+}
+
+.compare-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.compare-row + .compare-row {
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+
+.compare-label {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  flex-shrink: 0;
+}
+
+.compare-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  min-width: 0;
+  text-align: right;
+}
+
+.compare-current {
+  font-weight: 700;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.compare-delta {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compare-delta.positive {
+  color: var(--accent);
+}
+
+.compare-delta.negative {
+  color: var(--danger);
+}
+
+.compare-delta.neutral {
+  color: var(--text-muted);
+}
+
 .bottom-nav {
   position: fixed;
   left: 0;

@@ -8,6 +8,15 @@ const emptyList = document.getElementById("empty-list");
 const weeklyOverview = document.getElementById("weekly-overview");
 const emptyOverview = document.getElementById("empty-overview");
 
+const statChipRow = document.getElementById("stat-chips");
+const chartContainer = document.getElementById("trend-chart-container");
+const chartEmpty = document.getElementById("chart-empty");
+const bestList = document.getElementById("best-list");
+const emptyBests = document.getElementById("empty-bests");
+const weekCompare = document.getElementById("week-compare");
+
+let selectedStatExercise = null;
+
 const chipRow = document.getElementById("exercise-chips");
 const newExerciseInput = document.getElementById("new-exercise-input");
 const lastEntryInfo = document.getElementById("last-entry-info");
@@ -63,6 +72,32 @@ function getIsoWeekKey(dateStr) {
 function roundTo(value, decimals) {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+function toDateStr(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function formatShortDate(dateStr) {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+}
+
+function computeWeeklyTotals(entries) {
+  const totals = {};
+  for (const entry of entries) {
+    const weekKey = getIsoWeekKey(entry.date);
+    if (!totals[weekKey]) {
+      totals[weekKey] = { count: 0, reps: 0, distance: 0, duration: 0 };
+    }
+    totals[weekKey].count += 1;
+    if (entry.reps) totals[weekKey].reps += Number(entry.reps);
+    if (entry.distance) totals[weekKey].distance += Number(entry.distance);
+    if (entry.duration) totals[weekKey].duration += Number(entry.duration);
+  }
+  return totals;
 }
 
 function formatEntryDetails(entry) {
@@ -210,22 +245,14 @@ function deleteEntry(id) {
   renderList();
   renderWeeklyOverview();
   renderChips();
+  renderStatistik();
 }
 
 function renderWeeklyOverview() {
   const entries = loadEntries();
   weeklyOverview.innerHTML = "";
 
-  const totalsByWeek = {};
-  for (const entry of entries) {
-    const weekKey = getIsoWeekKey(entry.date);
-    if (!totalsByWeek[weekKey]) {
-      totalsByWeek[weekKey] = { reps: 0, distance: 0, duration: 0 };
-    }
-    if (entry.reps) totalsByWeek[weekKey].reps += Number(entry.reps);
-    if (entry.distance) totalsByWeek[weekKey].distance += Number(entry.distance);
-    if (entry.duration) totalsByWeek[weekKey].duration += Number(entry.duration);
-  }
+  const totalsByWeek = computeWeeklyTotals(entries);
 
   const weekKeys = Object.keys(totalsByWeek).sort().reverse();
 
@@ -306,7 +333,234 @@ form.addEventListener("submit", (event) => {
   updateLastEntryInfo(newEntry);
   renderList();
   renderWeeklyOverview();
+  renderStatistik();
 });
+
+const METRIC_LABELS = {
+  reps: { unit: "Wdh.", bestLabel: "Beste Wiederholungen" },
+  distance: { unit: "km", bestLabel: "Längste Distanz" },
+  duration: { unit: "min", bestLabel: "Längste Zeit" },
+};
+
+function getExerciseMetricKey(entries, exerciseName) {
+  const counts = { reps: 0, distance: 0, duration: 0 };
+  for (const entry of entries) {
+    if (entry.exercise !== exerciseName) continue;
+    if (entry.reps) counts.reps += 1;
+    if (entry.distance) counts.distance += 1;
+    if (entry.duration) counts.duration += 1;
+  }
+  if (counts.reps > 0 && counts.reps >= counts.distance && counts.reps >= counts.duration) return "reps";
+  if (counts.distance > 0 && counts.distance >= counts.duration) return "distance";
+  if (counts.duration > 0) return "duration";
+  return null;
+}
+
+function renderStatChips(recents) {
+  statChipRow.innerHTML = "";
+  for (const entry of recents) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    if (entry.exercise === selectedStatExercise) chip.classList.add("selected");
+    chip.textContent = entry.exercise;
+    chip.addEventListener("click", () => {
+      selectedStatExercise = entry.exercise;
+      renderStatistik();
+    });
+    statChipRow.appendChild(chip);
+  }
+}
+
+function buildTrendChartSvg(points, unit) {
+  const width = 320;
+  const height = 150;
+  const padX = 16;
+  const padTop = 24;
+  const padBottom = 26;
+
+  const dates = points.map((p) => new Date(p.date + "T00:00:00").getTime());
+  const values = points.map((p) => p.value);
+  const minDate = Math.min(...dates);
+  const maxDate = Math.max(...dates);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const dateSpan = maxDate - minDate || 1;
+  const valSpan = maxVal - minVal || 1;
+
+  const xFor = (d) => (points.length === 1 ? width / 2 : padX + ((d - minDate) / dateSpan) * (width - padX * 2));
+  const yFor = (v) => height - padBottom - ((v - minVal) / valSpan) * (height - padTop - padBottom);
+
+  const coords = points.map((p, i) => ({
+    x: xFor(dates[i]),
+    y: points.length === 1 ? height / 2 : yFor(p.value),
+    value: p.value,
+    date: p.date,
+  }));
+
+  const linePoints = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
+
+  const dots = coords
+    .map((c, i) => {
+      const isLast = i === coords.length - 1;
+      const r = isLast ? 4.5 : 3;
+      const cls = isLast ? "chart-dot chart-dot-current" : "chart-dot";
+      return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${r}" class="${cls}" />`;
+    })
+    .join("");
+
+  const last = coords[coords.length - 1];
+  const first = coords[0];
+  const labelAnchor = last.x > width - 40 ? "end" : "middle";
+  const labelY = Math.max(12, last.y - 10).toFixed(1);
+
+  const lineOrDot = points.length > 1 ? `<polyline points="${linePoints}" class="chart-line" />` : "";
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="trend-svg">
+      ${lineOrDot}
+      ${dots}
+      <text x="${last.x.toFixed(1)}" y="${labelY}" text-anchor="${labelAnchor}" class="chart-value-label">${last.value} ${unit}</text>
+      <text x="${padX}" y="${height - 6}" class="chart-date-label">${formatShortDate(first.date)}</text>
+      <text x="${width - padX}" y="${height - 6}" text-anchor="end" class="chart-date-label">${formatShortDate(last.date)}</text>
+    </svg>
+  `;
+}
+
+function renderTrendChart(entries, exerciseName) {
+  const metricKey = exerciseName ? getExerciseMetricKey(entries, exerciseName) : null;
+  const points = metricKey
+    ? entries
+        .filter((entry) => entry.exercise === exerciseName && entry[metricKey])
+        .map((entry) => ({ date: entry.date, value: Number(entry[metricKey]) }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-20)
+    : [];
+
+  if (points.length === 0) {
+    chartContainer.innerHTML = "";
+    chartEmpty.style.display = "block";
+    return;
+  }
+  chartEmpty.style.display = "none";
+  chartContainer.innerHTML = buildTrendChartSvg(points, METRIC_LABELS[metricKey].unit);
+}
+
+function renderPersonalBests(entries, exerciseName) {
+  bestList.innerHTML = "";
+  const relevant = entries.filter((entry) => entry.exercise === exerciseName);
+
+  const bests = [];
+  for (const key of ["reps", "distance", "duration"]) {
+    const best = relevant
+      .filter((entry) => entry[key])
+      .sort((a, b) => b[key] - a[key] || b.date.localeCompare(a.date))[0];
+    if (best) {
+      bests.push({
+        label: METRIC_LABELS[key].bestLabel,
+        value: `${best[key]} ${METRIC_LABELS[key].unit}`,
+        date: best.date,
+      });
+    }
+  }
+
+  if (bests.length === 0) {
+    emptyBests.style.display = "block";
+    return;
+  }
+  emptyBests.style.display = "none";
+
+  for (const best of bests) {
+    const li = document.createElement("li");
+
+    const label = document.createElement("span");
+    label.className = "best-label";
+    label.textContent = best.label;
+
+    const stats = document.createElement("div");
+    stats.className = "best-stats";
+
+    const valueEl = document.createElement("span");
+    valueEl.className = "best-value";
+    valueEl.textContent = best.value;
+
+    const dateEl = document.createElement("span");
+    dateEl.className = "best-date";
+    dateEl.textContent = new Date(best.date + "T00:00:00").toLocaleDateString("de-DE");
+
+    stats.append(valueEl, dateEl);
+    li.append(label, stats);
+    bestList.appendChild(li);
+  }
+}
+
+function renderWeekComparison(entries) {
+  const totals = computeWeeklyTotals(entries);
+
+  const today = new Date();
+  const currentWeekKey = getIsoWeekKey(toDateStr(today));
+  const previousDate = new Date(today);
+  previousDate.setDate(today.getDate() - 7);
+  const previousWeekKey = getIsoWeekKey(toDateStr(previousDate));
+
+  const empty = { count: 0, reps: 0, distance: 0, duration: 0 };
+  const current = totals[currentWeekKey] || empty;
+  const previous = totals[previousWeekKey] || empty;
+
+  const rows = [
+    { label: "Einheiten", unit: "", decimals: 0, current: current.count, previous: previous.count, always: true },
+    { label: "Wiederholungen", unit: "Wdh.", decimals: 0, current: current.reps, previous: previous.reps },
+    { label: "Distanz", unit: "km", decimals: 2, current: current.distance, previous: previous.distance },
+    { label: "Zeit", unit: "min", decimals: 0, current: current.duration, previous: previous.duration },
+  ].filter((row) => row.always || row.current > 0 || row.previous > 0);
+
+  weekCompare.innerHTML = "";
+
+  for (const row of rows) {
+    const delta = roundTo(row.current - row.previous, row.decimals);
+    const currentValue = roundTo(row.current, row.decimals);
+
+    const rowEl = document.createElement("div");
+    rowEl.className = "compare-row";
+
+    const label = document.createElement("span");
+    label.className = "compare-label";
+    label.textContent = row.label;
+
+    const values = document.createElement("div");
+    values.className = "compare-values";
+
+    const currentEl = document.createElement("span");
+    currentEl.className = "compare-current";
+    currentEl.textContent = row.unit ? `${currentValue} ${row.unit}` : `${currentValue}`;
+
+    const deltaEl = document.createElement("span");
+    const direction = delta > 0 ? "positive" : delta < 0 ? "negative" : "neutral";
+    deltaEl.className = `compare-delta ${direction}`;
+    const sign = delta > 0 ? "+" : "";
+    deltaEl.textContent = `${sign}${delta}${row.unit ? " " + row.unit : ""} ggü. Vorwoche`;
+
+    values.append(currentEl, deltaEl);
+    rowEl.append(label, values);
+    weekCompare.appendChild(rowEl);
+  }
+}
+
+function renderStatistik() {
+  const entries = loadEntries();
+  const recents = getExerciseRecency(entries);
+
+  if (recents.length === 0) {
+    selectedStatExercise = null;
+  } else if (!selectedStatExercise || !recents.some((entry) => entry.exercise === selectedStatExercise)) {
+    selectedStatExercise = recents[0].exercise;
+  }
+
+  renderStatChips(recents);
+  renderTrendChart(entries, selectedStatExercise);
+  renderPersonalBests(entries, selectedStatExercise);
+  renderWeekComparison(entries);
+}
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -326,6 +580,7 @@ function init() {
   }
   renderList();
   renderWeeklyOverview();
+  renderStatistik();
 }
 
 init();
