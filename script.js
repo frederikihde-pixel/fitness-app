@@ -1,0 +1,172 @@
+const STORAGE_KEY = "fitness-tracker-entries";
+
+const form = document.getElementById("entry-form");
+const dateInput = document.getElementById("date");
+const feedback = document.getElementById("save-feedback");
+const entryList = document.getElementById("entry-list");
+const emptyList = document.getElementById("empty-list");
+const weeklyOverview = document.getElementById("weekly-overview");
+const emptyOverview = document.getElementById("empty-overview");
+
+dateInput.valueAsDate = new Date();
+
+function loadEntries() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveEntries(entries) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+}
+
+function getIsoWeekKey(dateStr) {
+  const date = new Date(dateStr + "T00:00:00");
+  const target = new Date(date.valueOf());
+  const dayNr = (date.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = new Date(target.getFullYear(), 0, 4);
+  const firstDayNr = (firstThursday.getDay() + 6) % 7;
+  firstThursday.setDate(firstThursday.getDate() - firstDayNr + 3);
+  const weekNumber = 1 + Math.round((target - firstThursday) / (7 * 24 * 60 * 60 * 1000));
+  return `${target.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+}
+
+function formatEntryDetails(entry) {
+  const parts = [];
+  if (entry.reps) parts.push(`${entry.reps} Wdh.`);
+  if (entry.distance) parts.push(`${entry.distance} km`);
+  if (entry.duration) parts.push(`${entry.duration} min`);
+  return parts.join(" · ") || "Keine weiteren Angaben";
+}
+
+function renderList() {
+  const entries = loadEntries();
+  entryList.innerHTML = "";
+
+  if (entries.length === 0) {
+    emptyList.style.display = "block";
+    return;
+  }
+  emptyList.style.display = "none";
+
+  const sorted = [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+
+  for (const entry of sorted) {
+    const li = document.createElement("li");
+
+    const main = document.createElement("div");
+    main.className = "entry-main";
+
+    const exerciseEl = document.createElement("span");
+    exerciseEl.className = "entry-exercise";
+    exerciseEl.textContent = entry.exercise;
+
+    const detailsEl = document.createElement("span");
+    detailsEl.className = "entry-details";
+    detailsEl.textContent = formatEntryDetails(entry);
+
+    const dateEl = document.createElement("span");
+    dateEl.className = "entry-date";
+    dateEl.textContent = new Date(entry.date + "T00:00:00").toLocaleDateString("de-DE");
+
+    main.append(exerciseEl, detailsEl, dateEl);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "delete-btn";
+    deleteBtn.textContent = "🗑";
+    deleteBtn.setAttribute("aria-label", "Eintrag löschen");
+    deleteBtn.addEventListener("click", () => deleteEntry(entry.id));
+
+    li.append(main, deleteBtn);
+    entryList.appendChild(li);
+  }
+}
+
+function deleteEntry(id) {
+  const entries = loadEntries().filter((e) => e.id !== id);
+  saveEntries(entries);
+  renderList();
+  renderWeeklyOverview();
+}
+
+function renderWeeklyOverview() {
+  const entries = loadEntries();
+  weeklyOverview.innerHTML = "";
+
+  const totalsByWeek = {};
+  for (const entry of entries) {
+    if (!entry.reps) continue;
+    const weekKey = getIsoWeekKey(entry.date);
+    totalsByWeek[weekKey] = (totalsByWeek[weekKey] || 0) + Number(entry.reps);
+  }
+
+  const weekKeys = Object.keys(totalsByWeek).sort().reverse();
+
+  if (weekKeys.length === 0) {
+    emptyOverview.style.display = "block";
+    return;
+  }
+  emptyOverview.style.display = "none";
+
+  for (const weekKey of weekKeys) {
+    const li = document.createElement("li");
+
+    const label = document.createElement("span");
+    label.textContent = weekKey.replace("-W", " · KW ");
+
+    const total = document.createElement("span");
+    total.className = "week-total";
+    total.textContent = `${totalsByWeek[weekKey]} Wdh.`;
+
+    li.append(label, total);
+    weeklyOverview.appendChild(li);
+  }
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const exercise = document.getElementById("exercise").value.trim();
+  const reps = document.getElementById("reps").value;
+  const distance = document.getElementById("distance").value;
+  const duration = document.getElementById("duration").value;
+  const date = dateInput.value;
+
+  if (!exercise || !date) return;
+
+  const entries = loadEntries();
+  entries.push({
+    id: Date.now(),
+    exercise,
+    reps: reps ? Number(reps) : null,
+    distance: distance ? Number(distance) : null,
+    duration: duration ? Number(duration) : null,
+    date,
+  });
+  saveEntries(entries);
+
+  form.reset();
+  dateInput.valueAsDate = new Date();
+
+  feedback.textContent = "Eintrag gespeichert ✅";
+  setTimeout(() => (feedback.textContent = ""), 2000);
+
+  renderList();
+  renderWeeklyOverview();
+});
+
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.dataset.tab).classList.add("active");
+  });
+});
+
+renderList();
+renderWeeklyOverview();

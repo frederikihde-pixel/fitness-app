@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fitness-Tracker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🏋️ Fitness-Tracker</h1>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="eintragen">Eintragen</button>
+    <button class="tab-btn" data-tab="liste">Liste</button>
+    <button class="tab-btn" data-tab="uebersicht">Übersicht</button>
+  </nav>
+
+  <main>
+    <section id="eintragen" class="tab-content active">
+      <form id="entry-form">
+        <label for="exercise">Übung</label>
+        <input type="text" id="exercise" placeholder="z. B. Liegestütze, Laufen" required>
+
+        <label for="reps">Wiederholungen</label>
+        <input type="number" id="reps" min="0" placeholder="z. B. 20">
+
+        <label for="distance">Distanz (km)</label>
+        <input type="number" id="distance" min="0" step="0.01" placeholder="z. B. 5">
+
+        <label for="duration">Zeit (Minuten)</label>
+        <input type="number" id="duration" min="0" placeholder="z. B. 30">
+
+        <label for="date">Datum</label>
+        <input type="date" id="date" required>
+
+        <button type="submit">Speichern</button>
+      </form>
+      <p id="save-feedback" class="feedback"></p>
+    </section>
+
+    <section id="liste" class="tab-content">
+      <h2>Alle Einträge</h2>
+      <ul id="entry-list"></ul>
+      <p id="empty-list" class="empty-msg">Noch keine Einträge vorhanden.</p>
+    </section>
+
+    <section id="uebersicht" class="tab-content">
+      <h2>Wiederholungen pro Woche</h2>
+      <ul id="weekly-overview"></ul>
+      <p id="empty-overview" class="empty-msg">Noch keine Daten für die Übersicht.</p>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
