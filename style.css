@@ -155,6 +155,22 @@ h2 {
   gap: 0.5rem;
 }
 
+#weekly-overview li {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.week-label {
+  font-weight: 600;
+}
+
+.week-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
 .entry-main {
   display: flex;
   flex-direction: column;
