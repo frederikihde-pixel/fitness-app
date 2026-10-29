@@ -23,6 +23,15 @@ function saveEntries(entries) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
+function normalizeExerciseName(name) {
+  return name
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function getIsoWeekKey(dateStr) {
   const date = new Date(dateStr + "T00:00:00");
   const target = new Date(date.valueOf());
@@ -99,9 +108,13 @@ function renderWeeklyOverview() {
 
   const totalsByWeek = {};
   for (const entry of entries) {
-    if (!entry.reps) continue;
     const weekKey = getIsoWeekKey(entry.date);
-    totalsByWeek[weekKey] = (totalsByWeek[weekKey] || 0) + Number(entry.reps);
+    if (!totalsByWeek[weekKey]) {
+      totalsByWeek[weekKey] = { reps: 0, distance: 0, duration: 0 };
+    }
+    if (entry.reps) totalsByWeek[weekKey].reps += Number(entry.reps);
+    if (entry.distance) totalsByWeek[weekKey].distance += Number(entry.distance);
+    if (entry.duration) totalsByWeek[weekKey].duration += Number(entry.duration);
   }
 
   const weekKeys = Object.keys(totalsByWeek).sort().reverse();
@@ -113,24 +126,47 @@ function renderWeeklyOverview() {
   emptyOverview.style.display = "none";
 
   for (const weekKey of weekKeys) {
+    const totals = totalsByWeek[weekKey];
     const li = document.createElement("li");
 
     const label = document.createElement("span");
+    label.className = "week-label";
     label.textContent = weekKey.replace("-W", " · KW ");
 
-    const total = document.createElement("span");
-    total.className = "week-total";
-    total.textContent = `${totalsByWeek[weekKey]} Wdh.`;
+    const stats = document.createElement("div");
+    stats.className = "week-stats";
 
-    li.append(label, total);
+    const statParts = [
+      { value: totals.reps, text: `${totals.reps} Wdh.` },
+      { value: totals.distance, text: `${roundTo(totals.distance, 2)} km` },
+      { value: totals.duration, text: `${roundTo(totals.duration, 0)} min` },
+    ].filter((part) => part.value > 0);
+
+    if (statParts.length === 0) {
+      statParts.push({ text: "0 Wdh." });
+    }
+
+    for (const part of statParts) {
+      const statEl = document.createElement("span");
+      statEl.className = "week-total";
+      statEl.textContent = part.text;
+      stats.appendChild(statEl);
+    }
+
+    li.append(label, stats);
     weeklyOverview.appendChild(li);
   }
+}
+
+function roundTo(value, decimals) {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
 }
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  const exercise = document.getElementById("exercise").value.trim();
+  const exercise = normalizeExerciseName(document.getElementById("exercise").value);
   const reps = document.getElementById("reps").value;
   const distance = document.getElementById("distance").value;
   const duration = document.getElementById("duration").value;
