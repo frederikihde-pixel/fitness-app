@@ -141,9 +141,6 @@ input:focus {
   box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.18);
 }
 
-.new-exercise-input.hidden {
-  display: none;
-}
 
 .chip-row {
   display: flex;
@@ -184,12 +181,6 @@ input:focus {
   border-style: solid;
 }
 
-.last-entry-info {
-  margin: -0.75rem 0 0;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  min-height: 1.1em;
-}
 
 .stepper {
   display: flex;
@@ -239,31 +230,8 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 
-.save-btn {
-  font-family: inherit;
-  padding: 0.9rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background-color 0.2s ease, transform 0.1s ease;
-}
 
-.save-btn:active {
-  transform: scale(0.98);
-  background: var(--accent-strong);
-}
 
-.feedback {
-  margin: 0;
-  text-align: center;
-  color: var(--accent);
-  font-size: 0.85rem;
-  min-height: 1.2em;
-}
 
 h2 {
   font-size: 1rem;
@@ -542,4 +510,288 @@ h2 {
 .nav-btn.active {
   color: var(--accent);
   background: rgba(124, 140, 255, 0.1);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  min-height: 48px;
+  padding: 0.75rem 1.1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.1s ease;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.chip:focus-visible,
+.nav-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn-large {
+  min-height: 64px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.btn-primary:active {
+  background: var(--accent-strong);
+}
+
+.btn-secondary {
+  background: var(--surface-alt);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: var(--accent-contrast);
+}
+
+.btn-ghost-danger {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--danger);
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.icon-btn-accent {
+  color: var(--accent);
+}
+
+.icon-btn-plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* ---------- Start screen ---------- */
+
+#start-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card-kicker {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.active-card {
+  gap: 0.6rem;
+  border-color: var(--accent);
+}
+
+.active-card-name {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.active-card-timer {
+  margin: 0 0 0.5rem;
+  font-size: 2.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- Workout screen ---------- */
+
+body.in-workout .app-header {
+  display: none;
+}
+
+.workout-header {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 -1.25rem 1.25rem;
+  padding: calc(0.75rem + env(safe-area-inset-top)) 1.25rem 0.75rem;
+  background: rgba(11, 11, 14, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.workout-header-main {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.workout-title {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workout-timer {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  transition: color 0.2s ease;
+}
+
+.workout-status {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--accent);
+  min-height: 0;
+}
+
+.workout-status:empty {
+  display: none;
+}
+
+.is-paused .workout-timer {
+  color: var(--text-muted);
+}
+
+.workout-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.hint {
+  margin: 1rem 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.hint:empty {
+  display: none;
+}
+
+/* ---------- Dialogs ---------- */
+
+dialog.sheet {
+  width: min(100% - 2rem, 440px);
+  max-height: calc(100% - 2rem);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+}
+
+dialog.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+dialog.sheet[open] {
+  animation: fade-in 0.2s ease;
+}
+
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.5rem;
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.confirm-message {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.dialog-actions .btn {
+  flex: 1;
+}
+
+/* ---------- Toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  transform: translate(-50%, 1rem);
+  max-width: calc(100% - 2.5rem);
+  padding: 0.7rem 1.1rem;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.9rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 40;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

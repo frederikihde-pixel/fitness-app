@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0e">
 <title>Training</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -14,44 +15,45 @@
   </header>
 
   <main class="app-main">
-    <section id="eintragen" class="tab-content active">
-      <form id="entry-form" class="card">
-        <div class="field-group">
-          <label>Übung</label>
-          <div id="exercise-chips" class="chip-row"></div>
-          <input type="text" id="new-exercise-input" class="new-exercise-input hidden" placeholder="Name der neuen Übung" autocomplete="off">
+    <section id="training" class="tab-content active">
+      <div id="start-screen">
+        <div id="active-workout-card" class="card active-card" hidden>
+          <p class="card-kicker">Workout läuft</p>
+          <p id="active-card-name" class="active-card-name"></p>
+          <p id="active-card-timer" class="active-card-timer">0:00</p>
+          <button type="button" id="open-workout-btn" class="btn btn-primary btn-block">Fortsetzen</button>
         </div>
 
-        <p id="last-entry-info" class="last-entry-info"></p>
-
-        <div class="field-group">
-          <label for="reps">Wiederholungen</label>
-          <div class="stepper">
-            <button type="button" id="reps-minus" class="stepper-btn" aria-label="Weniger Wiederholungen">−</button>
-            <input type="number" id="reps" min="0" value="0" inputmode="numeric">
-            <button type="button" id="reps-plus" class="stepper-btn" aria-label="Mehr Wiederholungen">+</button>
-          </div>
-        </div>
-
-        <div class="field-row">
+        <div id="start-card" class="card">
           <div class="field-group">
-            <label for="distance">Distanz (km)</label>
-            <input type="number" id="distance" min="0" step="0.01" placeholder="0">
+            <label for="workout-name-input">Name des Workouts (optional)</label>
+            <input type="text" id="workout-name-input" placeholder="z. B. Oberkörper" autocomplete="off" maxlength="60">
           </div>
-          <div class="field-group">
-            <label for="duration">Zeit (Min.)</label>
-            <input type="number" id="duration" min="0" placeholder="0">
+          <button type="button" id="start-workout-btn" class="btn btn-primary btn-large">Workout starten</button>
+        </div>
+      </div>
+
+      <div id="workout-screen" hidden>
+        <div class="workout-header">
+          <button type="button" id="minimize-workout-btn" class="icon-btn" aria-label="Zur Startseite">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <div class="workout-header-main">
+            <p id="workout-title" class="workout-title"></p>
+            <p id="workout-timer" class="workout-timer">0:00</p>
+            <p id="workout-status" class="workout-status"></p>
           </div>
+          <button type="button" id="pause-btn" class="icon-btn icon-btn-accent" aria-label="Workout pausieren"></button>
         </div>
 
-        <div class="field-group">
-          <label for="date">Datum</label>
-          <input type="date" id="date" required>
-        </div>
+        <div id="workout-exercises"></div>
 
-        <button type="submit" class="save-btn">Speichern</button>
-        <p id="save-feedback" class="feedback" role="status"></p>
-      </form>
+        <div class="workout-actions">
+          <button type="button" id="finish-workout-btn" class="btn btn-primary btn-block">Workout beenden</button>
+          <button type="button" id="discard-workout-btn" class="btn btn-ghost-danger btn-block">Verwerfen</button>
+        </div>
+        <p id="wakelock-hint" class="hint"></p>
+      </div>
     </section>
 
     <section id="liste" class="tab-content">
@@ -83,24 +85,36 @@
     </section>
   </main>
 
-  <nav class="bottom-nav">
-    <button class="nav-btn active" data-tab="eintragen" aria-label="Eintragen">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
-      <span>Eintragen</span>
+  <nav class="bottom-nav" aria-label="Hauptnavigation">
+    <button type="button" class="nav-btn active" data-tab="training">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>
+      <span>Training</span>
     </button>
-    <button class="nav-btn" data-tab="liste" aria-label="Liste">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
-      <span>Liste</span>
+    <button type="button" class="nav-btn" data-tab="liste">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+      <span>Verlauf</span>
     </button>
-    <button class="nav-btn" data-tab="uebersicht" aria-label="Übersicht">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V10M12 19V5M19 19v-7"/></svg>
+    <button type="button" class="nav-btn" data-tab="uebersicht">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19V10M12 19V5M19 19v-7"/></svg>
       <span>Übersicht</span>
     </button>
-    <button class="nav-btn" data-tab="statistik" aria-label="Statistik">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l4.5-6 4 4L19 6"/><circle cx="19" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg>
+    <button type="button" class="nav-btn" data-tab="statistik">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16l4.5-6 4 4L19 6"/><circle cx="19" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg>
       <span>Statistik</span>
     </button>
   </nav>
+
+  <dialog id="confirm-dialog" class="sheet" aria-labelledby="confirm-message">
+    <form method="dialog" class="sheet-body">
+      <p id="confirm-message" class="confirm-message"></p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" value="ok" id="confirm-ok" class="btn btn-primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="script.js"></script>
 </body>

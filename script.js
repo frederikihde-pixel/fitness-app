@@ -242,9 +242,6 @@ function loadEntries() {
   return entries;
 }
 
-const form = document.getElementById("entry-form");
-const dateInput = document.getElementById("date");
-const feedback = document.getElementById("save-feedback");
 const entryList = document.getElementById("entry-list");
 const emptyList = document.getElementById("empty-list");
 const weeklyOverview = document.getElementById("weekly-overview");
@@ -258,24 +255,6 @@ const emptyBests = document.getElementById("empty-bests");
 const weekCompare = document.getElementById("week-compare");
 
 let selectedStatExercise = null;
-
-const chipRow = document.getElementById("exercise-chips");
-const newExerciseInput = document.getElementById("new-exercise-input");
-const lastEntryInfo = document.getElementById("last-entry-info");
-const repsInput = document.getElementById("reps");
-const repsMinus = document.getElementById("reps-minus");
-const repsPlus = document.getElementById("reps-plus");
-const distanceInput = document.getElementById("distance");
-const durationInput = document.getElementById("duration");
-
-let selectedExercise = null;
-let isNewExerciseMode = false;
-
-resetDateToToday();
-
-function resetDateToToday() {
-  dateInput.valueAsDate = new Date();
-}
 
 function normalizeExerciseName(name) {
   return name
@@ -352,82 +331,6 @@ function getExerciseRecency(entries) {
   return [...latestByExercise.values()].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
 }
 
-function renderChips() {
-  const entries = loadEntries();
-  const recents = getExerciseRecency(entries);
-
-  chipRow.innerHTML = "";
-
-  for (const entry of recents) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    if (entry.exercise === selectedExercise && !isNewExerciseMode) {
-      chip.classList.add("selected");
-    }
-    chip.textContent = entry.exercise;
-    chip.addEventListener("click", () => selectExercise(entry.exercise, recents));
-    chipRow.appendChild(chip);
-  }
-
-  const newChip = document.createElement("button");
-  newChip.type = "button";
-  newChip.className = "chip chip-new";
-  if (isNewExerciseMode) newChip.classList.add("selected");
-  newChip.textContent = "+ Neue Übung";
-  newChip.addEventListener("click", selectNewExercise);
-  chipRow.appendChild(newChip);
-
-  return recents;
-}
-
-function updateLastEntryInfo(entry) {
-  if (!entry) {
-    lastEntryInfo.textContent = "";
-    return;
-  }
-  const dateStr = new Date(entry.date + "T00:00:00").toLocaleDateString("de-DE");
-  lastEntryInfo.textContent = `Zuletzt: ${formatEntryDetails(entry)} · ${dateStr}`;
-}
-
-function selectExercise(name, recents) {
-  selectedExercise = name;
-  isNewExerciseMode = false;
-  newExerciseInput.classList.add("hidden");
-  newExerciseInput.value = "";
-
-  const last = recents.find((entry) => entry.exercise === name);
-  repsInput.value = last?.reps ?? 0;
-  distanceInput.value = last?.distance ?? "";
-  durationInput.value = last?.duration ?? "";
-  updateLastEntryInfo(last);
-
-  renderChips();
-}
-
-function selectNewExercise() {
-  selectedExercise = null;
-  isNewExerciseMode = true;
-  newExerciseInput.classList.remove("hidden");
-  newExerciseInput.value = "";
-  newExerciseInput.focus();
-
-  repsInput.value = 0;
-  distanceInput.value = "";
-  durationInput.value = "";
-  updateLastEntryInfo(null);
-
-  renderChips();
-}
-
-repsMinus.addEventListener("click", () => {
-  repsInput.value = Math.max(0, Number(repsInput.value || 0) - 1);
-});
-
-repsPlus.addEventListener("click", () => {
-  repsInput.value = Number(repsInput.value || 0) + 1;
-});
-
 function renderList() {
   const entries = loadEntries();
   entryList.innerHTML = "";
@@ -476,7 +379,6 @@ function deleteWorkout(workoutId) {
   saveState();
   renderList();
   renderWeeklyOverview();
-  renderChips();
   renderStatistik();
 }
 
@@ -526,58 +428,6 @@ function renderWeeklyOverview() {
     weeklyOverview.appendChild(li);
   }
 }
-
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
-
-  const exerciseName = isNewExerciseMode
-    ? normalizeExerciseName(newExerciseInput.value)
-    : selectedExercise;
-  const date = dateInput.value;
-
-  if (!exerciseName || !date) return;
-
-  const reps = Number(repsInput.value) || 0;
-  const distance = distanceInput.value ? Number(distanceInput.value) : null;
-  const duration = durationInput.value ? Number(durationInput.value) : null;
-
-  if (!state.exercises[exerciseName]) {
-    const type = reps > 0 ? "bodyweight" : distance ? "endurance" : duration ? "timed" : "bodyweight";
-    state.exercises[exerciseName] = { type };
-  }
-  const startedAt = new Date(date + "T12:00:00").getTime();
-  const durationSec = duration ? Math.round(duration * 60) : null;
-  state.workouts.push({
-    id: createId("w"),
-    name: formatWorkoutDefaultName(startedAt),
-    startedAt,
-    endedAt: startedAt + (durationSec ? durationSec * 1000 : 0),
-    pausedMs: 0,
-    exercises: [
-      {
-        id: createId("e"),
-        name: exerciseName,
-        sets: [{ id: createId("s"), weight: null, reps: reps > 0 ? reps : null, distance, durationSec, done: true }],
-      },
-    ],
-  });
-  saveState();
-  const newEntry = { exercise: exerciseName, reps: reps > 0 ? reps : null, distance, duration, date };
-
-  selectedExercise = exerciseName;
-  isNewExerciseMode = false;
-  newExerciseInput.classList.add("hidden");
-  resetDateToToday();
-
-  feedback.textContent = "Eintrag gespeichert";
-  setTimeout(() => (feedback.textContent = ""), 2000);
-
-  renderChips();
-  updateLastEntryInfo(newEntry);
-  renderList();
-  renderWeeklyOverview();
-  renderStatistik();
-});
 
 const METRIC_LABELS = {
   reps: { unit: "Wdh.", bestLabel: "Beste Wiederholungen" },
@@ -805,25 +655,302 @@ function renderStatistik() {
   renderWeekComparison(entries);
 }
 
-document.querySelectorAll(".nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById(btn.dataset.tab).classList.add("active");
-  });
-});
+// ---------- Formatting ----------
 
-function init() {
-  const recents = renderChips();
-  if (recents.length > 0) {
-    selectExercise(recents[0].exercise, recents);
+function formatClock(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = String(totalSec % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+function formatDurationLong(ms) {
+  const totalMin = Math.round(ms / 60000);
+  if (totalMin < 60) return `${totalMin} min`;
+  return `${Math.floor(totalMin / 60)} h ${String(totalMin % 60).padStart(2, "0")} min`;
+}
+
+// ---------- Toast and confirm dialog ----------
+
+const toastEl = document.getElementById("toast");
+let toastTimer = null;
+
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.classList.add("visible");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 2600);
+}
+
+const confirmDialogEl = document.getElementById("confirm-dialog");
+const confirmMessageEl = document.getElementById("confirm-message");
+const confirmOkBtn = document.getElementById("confirm-ok");
+
+function confirmDialog(message, { confirmLabel = "OK", danger = false } = {}) {
+  confirmMessageEl.textContent = message;
+  confirmOkBtn.textContent = confirmLabel;
+  confirmOkBtn.classList.toggle("btn-danger", danger);
+  confirmOkBtn.classList.toggle("btn-primary", !danger);
+  confirmDialogEl.returnValue = "";
+  return new Promise((resolve) => {
+    confirmDialogEl.addEventListener("close", () => resolve(confirmDialogEl.returnValue === "ok"), { once: true });
+    confirmDialogEl.showModal();
+  });
+}
+
+// ---------- Active workout ----------
+
+const ICONS = {
+  pause: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+};
+
+const startScreen = document.getElementById("start-screen");
+const workoutScreen = document.getElementById("workout-screen");
+const activeCard = document.getElementById("active-workout-card");
+const activeCardKicker = activeCard.querySelector(".card-kicker");
+const activeCardName = document.getElementById("active-card-name");
+const activeCardTimer = document.getElementById("active-card-timer");
+const startCard = document.getElementById("start-card");
+const workoutNameInput = document.getElementById("workout-name-input");
+const workoutTitle = document.getElementById("workout-title");
+const workoutTimer = document.getElementById("workout-timer");
+const workoutStatus = document.getElementById("workout-status");
+const pauseBtn = document.getElementById("pause-btn");
+const wakeLockHint = document.getElementById("wakelock-hint");
+
+let currentTab = "training";
+let workoutViewOpen = false;
+
+// Elapsed time is derived from timestamps, so it stays correct across reloads, locked screens and background tabs.
+function getElapsedMs(workout, now = Date.now()) {
+  const end = workout.endedAt ?? workout.pausedAt ?? now;
+  return Math.max(0, end - workout.startedAt - (workout.pausedMs || 0));
+}
+
+function startWorkout() {
+  const now = Date.now();
+  const name = workoutNameInput.value.trim();
+  state.activeWorkout = {
+    id: createId("w"),
+    name: name || formatWorkoutDefaultName(now),
+    startedAt: now,
+    pausedAt: null,
+    pausedMs: 0,
+    exercises: [],
+    restEndsAt: null,
+    restTotalSec: null,
+  };
+  workoutNameInput.value = "";
+  saveState();
+  workoutViewOpen = true;
+  renderTraining();
+  syncWakeLock();
+  window.scrollTo(0, 0);
+}
+
+function togglePause() {
+  const workout = state.activeWorkout;
+  if (!workout) return;
+  const now = Date.now();
+  if (workout.pausedAt) {
+    workout.pausedMs += now - workout.pausedAt;
+    workout.pausedAt = null;
   } else {
-    selectNewExercise();
+    workout.pausedAt = now;
   }
+  saveState();
+  renderTraining();
+  syncWakeLock();
+}
+
+function finalizeActiveWorkout() {
+  const workout = state.activeWorkout;
+  const now = Date.now();
+  if (workout.pausedAt) {
+    workout.pausedMs += now - workout.pausedAt;
+    workout.pausedAt = null;
+  }
+  const exercises = workout.exercises
+    .map((exercise) => ({
+      id: exercise.id,
+      name: exercise.name,
+      sets: exercise.sets.filter((set) => !set.planned).map(({ planned, ...set }) => set),
+    }))
+    .filter((exercise) => exercise.sets.length > 0);
+  const finished = {
+    id: workout.id,
+    name: workout.name,
+    startedAt: workout.startedAt,
+    endedAt: now,
+    pausedMs: workout.pausedMs,
+    exercises,
+  };
+  state.workouts.push(finished);
+  state.activeWorkout = null;
+  saveState();
+  return finished;
+}
+
+async function finishWorkout() {
+  const ok = await confirmDialog("Workout jetzt beenden und speichern?", { confirmLabel: "Beenden" });
+  if (!ok || !state.activeWorkout) return;
+  finalizeActiveWorkout();
+  workoutViewOpen = false;
+  renderAll();
+  syncWakeLock();
+  showToast("Workout gespeichert");
+}
+
+async function discardWorkout() {
+  const ok = await confirmDialog("Workout verwerfen? Alle Eingaben dieses Workouts gehen verloren.", {
+    confirmLabel: "Verwerfen",
+    danger: true,
+  });
+  if (!ok || !state.activeWorkout) return;
+  state.activeWorkout = null;
+  saveState();
+  workoutViewOpen = false;
+  renderAll();
+  syncWakeLock();
+  showToast("Workout verworfen");
+}
+
+function updateTimers() {
+  const workout = state.activeWorkout;
+  if (!workout) return;
+  const text = formatClock(getElapsedMs(workout));
+  workoutTimer.textContent = text;
+  activeCardTimer.textContent = text;
+}
+
+function renderTraining() {
+  const workout = state.activeWorkout;
+  const showWorkout = Boolean(workout) && workoutViewOpen;
+  startScreen.hidden = showWorkout;
+  workoutScreen.hidden = !showWorkout;
+  document.body.classList.toggle("in-workout", showWorkout && currentTab === "training");
+  activeCard.hidden = !workout;
+  startCard.hidden = Boolean(workout);
+
+  if (workout) {
+    const paused = Boolean(workout.pausedAt);
+    activeCardKicker.textContent = paused ? "Workout pausiert" : "Workout läuft";
+    activeCardName.textContent = workout.name;
+    workoutTitle.textContent = workout.name;
+    pauseBtn.innerHTML = paused ? ICONS.play : ICONS.pause;
+    pauseBtn.setAttribute("aria-label", paused ? "Workout fortsetzen" : "Workout pausieren");
+    workoutStatus.textContent = paused ? "Pausiert – die Zeit läuft nicht weiter" : "";
+    workoutScreen.classList.toggle("is-paused", paused);
+    updateTimers();
+  }
+}
+
+// ---------- Wake Lock ----------
+
+const wakeLockSupported = "wakeLock" in navigator;
+let wakeLockSentinel = null;
+let wakeLockBusy = false;
+let wakeLockFailed = false;
+
+async function syncWakeLock() {
+  if (wakeLockBusy) return;
+  const shouldHold =
+    Boolean(state.activeWorkout) && !state.activeWorkout.pausedAt && document.visibilityState === "visible";
+  if (wakeLockSupported) {
+    wakeLockBusy = true;
+    try {
+      if (shouldHold && !wakeLockSentinel) {
+        wakeLockSentinel = await navigator.wakeLock.request("screen");
+        wakeLockFailed = false;
+        wakeLockSentinel.addEventListener("release", () => {
+          wakeLockSentinel = null;
+          updateWakeLockHint();
+        });
+      } else if (!shouldHold && wakeLockSentinel) {
+        await wakeLockSentinel.release();
+        wakeLockSentinel = null;
+      }
+    } catch {
+      wakeLockSentinel = null;
+      wakeLockFailed = true;
+    } finally {
+      wakeLockBusy = false;
+    }
+  }
+  updateWakeLockHint();
+}
+
+function updateWakeLockHint() {
+  const workout = state.activeWorkout;
+  let text = "";
+  if (workout && !workout.pausedAt) {
+    if (wakeLockSentinel) text = "Der Bildschirm bleibt während des Workouts an.";
+    else if (!wakeLockSupported || wakeLockFailed)
+      text = "Dein Browser kann den Bildschirm nicht wachhalten. Verlängere bei Bedarf die automatische Sperre in den Handy-Einstellungen.";
+  }
+  wakeLockHint.textContent = text;
+}
+
+// ---------- Navigation and rendering ----------
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll(".nav-btn").forEach((btn) => {
+    const active = btn.dataset.tab === tab;
+    btn.classList.toggle("active", active);
+    if (active) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+  document.querySelectorAll(".tab-content").forEach((section) => {
+    section.classList.toggle("active", section.id === tab);
+  });
+  renderTraining();
+  window.scrollTo(0, 0);
+}
+
+function renderAll() {
+  renderTraining();
   renderList();
   renderWeeklyOverview();
   renderStatistik();
 }
 
-init();
+function tick() {
+  updateTimers();
+}
+
+document.querySelectorAll(".nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+document.getElementById("start-workout-btn").addEventListener("click", startWorkout);
+document.getElementById("open-workout-btn").addEventListener("click", () => {
+  workoutViewOpen = true;
+  renderTraining();
+  syncWakeLock();
+  window.scrollTo(0, 0);
+});
+document.getElementById("minimize-workout-btn").addEventListener("click", () => {
+  workoutViewOpen = false;
+  renderTraining();
+});
+pauseBtn.addEventListener("click", togglePause);
+document.getElementById("finish-workout-btn").addEventListener("click", finishWorkout);
+document.getElementById("discard-workout-btn").addEventListener("click", discardWorkout);
+
+document.addEventListener("visibilitychange", () => {
+  tick();
+  syncWakeLock();
+});
+
+window.addEventListener("storage", (event) => {
+  if (event.key !== DATA_KEY) return;
+  state = loadState();
+  renderAll();
+});
+
+setInterval(tick, 500);
+renderAll();
+syncWakeLock();
