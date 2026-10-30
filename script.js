@@ -845,7 +845,603 @@ function renderTraining() {
     workoutScreen.classList.toggle("is-paused", paused);
     updateTimers();
   }
+  renderWorkoutExercises();
+  updateRestTimer();
 }
+
+// ---------- Number and set formatting ----------
+
+const CHECK_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const TRASH_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12"/></svg>';
+
+function formatNumber(value, maxDecimals = 2) {
+  return Number(value || 0).toLocaleString("de-DE", { maximumFractionDigits: maxDecimals });
+}
+
+function parseDecimal(text) {
+  const trimmed = String(text ?? "").trim().replace(",", ".");
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : NaN;
+}
+
+// Accepts "m:ss", "h:mm:ss" or a plain number interpreted in plainUnit ("min" or "sec"). Returns seconds.
+function parseDurationInput(text, plainUnit) {
+  const trimmed = String(text ?? "").trim();
+  if (trimmed === "") return null;
+  if (trimmed.includes(":")) {
+    const parts = trimmed.split(":").map((part) => Number(part.replace(",", ".")));
+    if (parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) return NaN;
+    return Math.round(parts.reduce((total, part) => total * 60 + part, 0));
+  }
+  const value = parseDecimal(trimmed);
+  if (!Number.isFinite(value)) return NaN;
+  return Math.round(plainUnit === "min" ? value * 60 : value);
+}
+
+function getPaceSecPerKm(set) {
+  return set.distance > 0 && set.durationSec > 0 ? set.durationSec / set.distance : null;
+}
+
+function formatPace(secPerKm) {
+  return `${formatClock(Math.round(secPerKm) * 1000)} min/${UNITS.distance}`;
+}
+
+function formatGenericSet(set) {
+  const parts = [];
+  if (set.weight) parts.push(`${formatNumber(set.weight)} ${UNITS.weight}`);
+  if (set.reps) parts.push(`${set.reps} Wdh.`);
+  if (set.distance) parts.push(`${formatNumber(set.distance)} ${UNITS.distance}`);
+  if (set.durationSec) parts.push(formatClock(set.durationSec * 1000));
+  return parts.join(" · ") || "ohne Werte";
+}
+
+function formatSet(set, type) {
+  if (type === "strength" && set.reps) return `${formatNumber(set.weight)} ${UNITS.weight} × ${set.reps}`;
+  if (type === "bodyweight" && set.reps) return `${set.reps} Wdh.`;
+  if (type === "timed" && set.durationSec) return formatClock(set.durationSec * 1000);
+  if (type === "endurance" && (set.distance || set.durationSec)) {
+    const parts = [];
+    if (set.distance) parts.push(`${formatNumber(set.distance)} ${UNITS.distance}`);
+    if (set.durationSec) parts.push(`in ${formatClock(set.durationSec * 1000)}`);
+    const pace = getPaceSecPerKm(set);
+    if (pace) parts.push(`(${formatPace(pace)})`);
+    return parts.join(" ");
+  }
+  return formatGenericSet(set);
+}
+
+function summarizeSets(sets, type) {
+  const allSame = (key) => sets.every((set) => set[key] === sets[0][key]);
+  if (type === "strength" && sets.every((set) => set.reps)) {
+    if (allSame("weight") && allSame("reps")) {
+      return `${sets.length} × ${sets[0].reps} mit ${formatNumber(sets[0].weight)} ${UNITS.weight}`;
+    }
+    return sets.map((set) => `${set.reps} × ${formatNumber(set.weight)} ${UNITS.weight}`).join(", ");
+  }
+  if (type === "bodyweight" && sets.every((set) => set.reps)) {
+    return allSame("reps") ? `${sets.length} × ${sets[0].reps} Wdh.` : `${sets.map((set) => set.reps).join(", ")} Wdh.`;
+  }
+  if (type === "timed" && sets.every((set) => set.durationSec)) {
+    return allSame("durationSec")
+      ? `${sets.length} × ${formatClock(sets[0].durationSec * 1000)}`
+      : sets.map((set) => formatClock(set.durationSec * 1000)).join(", ");
+  }
+  return sets.map((set) => formatSet(set, type)).join(", ");
+}
+
+// ---------- Exercises in a workout ----------
+
+// ctx is { kind: "active" } for the running workout or { kind: "finished", workoutId } for a saved one.
+function getWorkoutByCtx(ctx) {
+  if (ctx.kind === "active") return state.activeWorkout;
+  return state.workouts.find((workout) => workout.id === ctx.workoutId) || null;
+}
+
+function getRealSets(exercise) {
+  return exercise.sets.filter((set) => !set.planned);
+}
+
+function getKnownExercisesByRecency() {
+  const lastUsed = new Map();
+  const consider = (workout) => {
+    for (const exercise of workout.exercises) {
+      if ((lastUsed.get(exercise.name) ?? -Infinity) < workout.startedAt) lastUsed.set(exercise.name, workout.startedAt);
+    }
+  };
+  state.workouts.forEach(consider);
+  if (state.activeWorkout) consider(state.activeWorkout);
+  const names = new Set([...Object.keys(state.exercises), ...lastUsed.keys()]);
+  return [...names].sort((a, b) => (lastUsed.get(b) ?? 0) - (lastUsed.get(a) ?? 0) || a.localeCompare(b, "de"));
+}
+
+// Sets of this exercise from the most recent saved workout that started before `before`.
+function getPreviousSets(name, before, excludeWorkoutId) {
+  const candidates = state.workouts
+    .filter((workout) => workout.id !== excludeWorkoutId && workout.startedAt < before)
+    .sort((a, b) => b.startedAt - a.startedAt);
+  for (const workout of candidates) {
+    const exercise = workout.exercises.find((item) => item.name === name);
+    const sets = exercise ? getRealSets(exercise) : [];
+    if (sets.length > 0) return { workout, sets };
+  }
+  return null;
+}
+
+const DEFAULT_SET = {
+  strength: { weight: 20, reps: 8 },
+  bodyweight: { reps: 10 },
+  endurance: { distance: null, durationSec: null },
+  timed: { durationSec: 30 },
+};
+
+function pickSetValues(set) {
+  return { weight: set.weight ?? null, reps: set.reps ?? null, distance: set.distance ?? null, durationSec: set.durationSec ?? null };
+}
+
+function getPrefillValues(workout, exercise, index = null) {
+  const realSets = getRealSets(exercise);
+  if (index === null && realSets.length > 0) return pickSetValues(realSets[realSets.length - 1]);
+  const previous = getPreviousSets(exercise.name, workout.startedAt, workout.id);
+  if (previous) {
+    const source = index !== null && previous.sets[index] ? previous.sets[index] : previous.sets[previous.sets.length - 1];
+    return pickSetValues(source);
+  }
+  return pickSetValues(DEFAULT_SET[getExerciseType(exercise.name)] || {});
+}
+
+function persistAndRender() {
+  saveState();
+  renderAll();
+}
+
+function renderExerciseList(container, workout, ctx) {
+  container.innerHTML = "";
+  workout.exercises.forEach((exercise) => {
+    const type = getExerciseType(exercise.name);
+    const card = document.createElement("article");
+    card.className = "exercise-card";
+    card.dataset.exerciseId = exercise.id;
+
+    const head = document.createElement("header");
+    head.className = "exercise-head";
+    const titleWrap = document.createElement("div");
+    const title = document.createElement("h3");
+    title.className = "exercise-name";
+    title.textContent = exercise.name;
+    const typeLabel = document.createElement("p");
+    typeLabel.className = "exercise-type";
+    typeLabel.textContent = EXERCISE_TYPES[type].label;
+    titleWrap.append(title, typeLabel);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "icon-btn icon-btn-plain";
+    removeBtn.innerHTML = TRASH_ICON;
+    removeBtn.setAttribute("aria-label", `Übung ${exercise.name} entfernen`);
+    removeBtn.addEventListener("click", () => removeExercise(ctx, exercise.id));
+    head.append(titleWrap, removeBtn);
+    card.appendChild(head);
+
+    const previous = getPreviousSets(exercise.name, workout.startedAt, workout.id);
+    if (previous) {
+      const last = document.createElement("p");
+      last.className = "last-time";
+      last.textContent = `Letztes Mal: ${summarizeSets(previous.sets, type)}`;
+      card.appendChild(last);
+    }
+
+    if (exercise.sets.length > 0) {
+      const list = document.createElement("ol");
+      list.className = "set-list";
+      exercise.sets.forEach((set, index) => {
+        const row = document.createElement("li");
+        row.className = "set-row";
+        row.classList.toggle("is-planned", Boolean(set.planned));
+        row.classList.toggle("is-done", Boolean(set.done) && !set.planned);
+
+        const indexEl = document.createElement("span");
+        indexEl.className = "set-index";
+        indexEl.textContent = String(index + 1);
+        indexEl.setAttribute("aria-hidden", "true");
+
+        const valueText = formatSet(set, type);
+        const main = document.createElement("button");
+        main.type = "button";
+        main.className = "set-main";
+        main.setAttribute("aria-label", `Satz ${index + 1} bearbeiten: ${valueText}${set.planned ? " (vorgeschlagen)" : ""}`);
+        const valueEl = document.createElement("span");
+        valueEl.className = "set-value";
+        valueEl.textContent = valueText;
+        main.appendChild(valueEl);
+        if (set.planned) {
+          const tag = document.createElement("span");
+          tag.className = "set-tag";
+          tag.textContent = "Vorschlag";
+          main.appendChild(tag);
+        }
+        main.addEventListener("click", () => openSetDialog(ctx, exercise.id, set.id));
+        row.append(indexEl, main);
+
+        if (ctx.kind === "active") {
+          const check = document.createElement("button");
+          check.type = "button";
+          check.className = "check-btn";
+          const done = Boolean(set.done) && !set.planned;
+          check.setAttribute("aria-pressed", String(done));
+          check.setAttribute("aria-label", `Satz ${index + 1} ${done ? "nicht mehr als erledigt markieren" : "als erledigt markieren"}`);
+          check.innerHTML = CHECK_ICON;
+          check.addEventListener("click", () => toggleSetDone(exercise.id, set.id));
+          row.appendChild(check);
+        }
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
+
+    const addSetBtn = document.createElement("button");
+    addSetBtn.type = "button";
+    addSetBtn.className = "btn btn-secondary btn-block add-set-btn";
+    addSetBtn.textContent = "+ Satz hinzufügen";
+    addSetBtn.setAttribute("aria-label", `Satz zu ${exercise.name} hinzufügen`);
+    addSetBtn.addEventListener("click", () => openSetDialog(ctx, exercise.id, null));
+    card.appendChild(addSetBtn);
+
+    container.appendChild(card);
+  });
+}
+
+async function removeExercise(ctx, exerciseId) {
+  const workout = getWorkoutByCtx(ctx);
+  const exercise = workout?.exercises.find((item) => item.id === exerciseId);
+  if (!exercise) return;
+  const count = getRealSets(exercise).length;
+  const ok = await confirmDialog(
+    `Übung „${exercise.name}“${count ? ` mit ${count} ${count === 1 ? "Satz" : "Sätzen"}` : ""} aus dem Workout entfernen?`,
+    { confirmLabel: "Entfernen", danger: true }
+  );
+  if (!ok) return;
+  workout.exercises = workout.exercises.filter((item) => item.id !== exerciseId);
+  persistAndRender();
+}
+
+function toggleSetDone(exerciseId, setId) {
+  const workout = state.activeWorkout;
+  const set = workout?.exercises.find((item) => item.id === exerciseId)?.sets.find((item) => item.id === setId);
+  if (!set) return;
+  const nowDone = set.planned ? true : !set.done;
+  set.planned = false;
+  set.done = nowDone;
+  if (nowDone) startRest();
+  persistAndRender();
+}
+
+// ---------- Add exercise dialog ----------
+
+const exerciseDialog = document.getElementById("exercise-dialog");
+const exerciseForm = document.getElementById("exercise-form");
+const exerciseKnownSection = document.getElementById("exercise-known-section");
+const exerciseKnownChips = document.getElementById("exercise-known-chips");
+const newExerciseName = document.getElementById("new-exercise-name");
+const typePicker = document.getElementById("type-picker");
+const exerciseHint = document.getElementById("exercise-hint");
+const exerciseError = document.getElementById("exercise-error");
+let exerciseDialogCtx = null;
+
+function openExerciseDialog(ctx) {
+  exerciseDialogCtx = ctx;
+  const workout = getWorkoutByCtx(ctx);
+  const inWorkout = new Set(workout.exercises.map((exercise) => exercise.name));
+  const known = getKnownExercisesByRecency().filter((name) => !inWorkout.has(name));
+
+  exerciseKnownChips.innerHTML = "";
+  for (const name of known) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = name;
+    chip.setAttribute("aria-label", `${name} hinzufügen (${EXERCISE_TYPES[getExerciseType(name)].label})`);
+    chip.addEventListener("click", () => addExerciseToWorkout(name));
+    exerciseKnownChips.appendChild(chip);
+  }
+  exerciseKnownSection.hidden = known.length === 0;
+  exerciseForm.reset();
+  exerciseHint.textContent = "";
+  exerciseError.textContent = "";
+  typePicker.disabled = false;
+  exerciseDialog.showModal();
+}
+
+function addExerciseToWorkout(name, type) {
+  const workout = getWorkoutByCtx(exerciseDialogCtx);
+  if (!workout) return;
+  if (!state.exercises[name]) state.exercises[name] = { type: type || "strength" };
+  workout.exercises.push({ id: createId("e"), name, sets: [] });
+  exerciseDialog.close();
+  persistAndRender();
+  const card = document.querySelector(`[data-exercise-id="${workout.exercises[workout.exercises.length - 1].id}"]`);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+newExerciseName.addEventListener("input", () => {
+  const name = normalizeExerciseName(newExerciseName.value);
+  exerciseError.textContent = "";
+  const existing = name && state.exercises[name];
+  if (existing) {
+    exerciseHint.textContent = `„${name}“ gibt es schon (Typ: ${EXERCISE_TYPES[existing.type].label}). Sie wird mit diesem Typ hinzugefügt.`;
+    typePicker.disabled = true;
+  } else {
+    exerciseHint.textContent = "";
+    typePicker.disabled = false;
+  }
+});
+
+exerciseForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = normalizeExerciseName(newExerciseName.value);
+  if (!name) {
+    exerciseError.textContent = "Bitte gib einen Namen ein oder wähle oben eine Übung.";
+    newExerciseName.focus();
+    return;
+  }
+  const workout = getWorkoutByCtx(exerciseDialogCtx);
+  if (workout.exercises.some((exercise) => exercise.name === name)) {
+    exerciseError.textContent = `„${name}“ ist schon in diesem Workout.`;
+    return;
+  }
+  const type = exerciseForm.elements["exercise-type"].value;
+  addExerciseToWorkout(name, type);
+});
+
+document.getElementById("exercise-cancel").addEventListener("click", () => exerciseDialog.close());
+
+// ---------- Set editor dialog ----------
+
+const setDialog = document.getElementById("set-dialog");
+const setForm = document.getElementById("set-form");
+const setDialogTitle = document.getElementById("set-dialog-title");
+const setDialogLast = document.getElementById("set-dialog-last");
+const setWeightInput = document.getElementById("set-weight");
+const setRepsInput = document.getElementById("set-reps");
+const setDistanceInput = document.getElementById("set-distance");
+const setTimeInput = document.getElementById("set-time");
+const setDurationInput = document.getElementById("set-duration");
+const setPace = document.getElementById("set-pace");
+const setError = document.getElementById("set-error");
+const setDeleteBtn = document.getElementById("set-delete");
+let setEditor = null;
+
+const FIELDS_BY_TYPE = {
+  strength: ["weight", "reps"],
+  bodyweight: ["reps"],
+  endurance: ["distance", "time"],
+  timed: ["duration"],
+};
+
+function formatInputNumber(value) {
+  return value === null || value === undefined ? "" : String(roundTo(value, 2)).replace(".", ",");
+}
+
+function openSetDialog(ctx, exerciseId, setId) {
+  const workout = getWorkoutByCtx(ctx);
+  const exercise = workout?.exercises.find((item) => item.id === exerciseId);
+  if (!exercise) return;
+  const type = getExerciseType(exercise.name);
+  const set = setId ? exercise.sets.find((item) => item.id === setId) : null;
+  const index = set ? exercise.sets.indexOf(set) : exercise.sets.length;
+  const values = set ? pickSetValues(set) : getPrefillValues(workout, exercise);
+  setEditor = { ctx, exerciseId, setId, type };
+
+  setDialogTitle.textContent = `${exercise.name} · Satz ${index + 1}`;
+  const previous = getPreviousSets(exercise.name, workout.startedAt, workout.id);
+  setDialogLast.textContent = previous ? `Letztes Mal: ${summarizeSets(previous.sets, type)}` : "";
+
+  const visible = FIELDS_BY_TYPE[type];
+  setForm.querySelectorAll("[data-field]").forEach((group) => {
+    group.hidden = !visible.includes(group.dataset.field);
+  });
+  setWeightInput.value = formatInputNumber(values.weight ?? 0);
+  setRepsInput.value = values.reps ? String(values.reps) : "";
+  setDistanceInput.value = formatInputNumber(values.distance);
+  setTimeInput.value = values.durationSec ? formatClock(values.durationSec * 1000) : "";
+  setDurationInput.value = values.durationSec ? String(values.durationSec) : "";
+  setError.textContent = "";
+  setDeleteBtn.hidden = !set;
+  updatePacePreview();
+  setDialog.showModal();
+}
+
+function updatePacePreview() {
+  const distance = parseDecimal(setDistanceInput.value);
+  const durationSec = parseDurationInput(setTimeInput.value, "min");
+  const pace = getPaceSecPerKm({ distance, durationSec });
+  setPace.textContent = pace ? `Tempo: ${formatPace(pace)}` : "";
+}
+
+setDistanceInput.addEventListener("input", updatePacePreview);
+setTimeInput.addEventListener("input", updatePacePreview);
+
+setForm.querySelectorAll("[data-step-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.stepTarget);
+    const step = Number(button.dataset.step);
+    if (input === setDurationInput) {
+      const current = parseDurationInput(input.value, "sec");
+      input.value = String(Math.max(0, (Number.isFinite(current) ? current : 0) + step));
+      return;
+    }
+    const current = parseDecimal(input.value);
+    const next = Math.max(0, roundTo((Number.isFinite(current) ? current : 0) + step, 2));
+    input.value = formatInputNumber(next);
+  });
+});
+
+function readSetForm(type) {
+  const values = { weight: null, reps: null, distance: null, durationSec: null };
+  if (type === "strength") {
+    const weight = parseDecimal(setWeightInput.value);
+    if (weight === null || Number.isNaN(weight) || weight < 0) return { error: "Bitte ein gültiges Gewicht eingeben (0 oder mehr)." };
+    values.weight = roundTo(weight, 2);
+  }
+  if (type === "strength" || type === "bodyweight") {
+    const reps = parseDecimal(setRepsInput.value);
+    if (!Number.isInteger(reps) || reps < 1) return { error: "Bitte mindestens 1 Wiederholung eingeben." };
+    values.reps = reps;
+  }
+  if (type === "endurance") {
+    const distance = parseDecimal(setDistanceInput.value);
+    const durationSec = parseDurationInput(setTimeInput.value, "min");
+    if (Number.isNaN(distance) || (distance !== null && distance < 0)) return { error: "Bitte eine gültige Distanz eingeben." };
+    if (Number.isNaN(durationSec)) return { error: "Bitte die Zeit als Minuten oder mm:ss eingeben." };
+    if (!(distance > 0) && !(durationSec > 0)) return { error: "Bitte Distanz oder Zeit eingeben." };
+    values.distance = distance > 0 ? roundTo(distance, 2) : null;
+    values.durationSec = durationSec > 0 ? durationSec : null;
+  }
+  if (type === "timed") {
+    const durationSec = parseDurationInput(setDurationInput.value, "sec");
+    if (!(durationSec > 0)) return { error: "Bitte eine Dauer größer als 0 eingeben." };
+    values.durationSec = durationSec;
+  }
+  return { values };
+}
+
+setForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!setEditor) return;
+  const { values, error } = readSetForm(setEditor.type);
+  if (error) {
+    setError.textContent = error;
+    return;
+  }
+  const workout = getWorkoutByCtx(setEditor.ctx);
+  const exercise = workout?.exercises.find((item) => item.id === setEditor.exerciseId);
+  if (!exercise) return;
+  const existing = setEditor.setId ? exercise.sets.find((item) => item.id === setEditor.setId) : null;
+  if (existing) {
+    Object.assign(existing, values, { planned: false });
+  } else {
+    exercise.sets.push({ id: createId("s"), ...values, done: false });
+  }
+  setDialog.close();
+  persistAndRender();
+});
+
+setDeleteBtn.addEventListener("click", async () => {
+  if (!setEditor?.setId) return;
+  const editor = setEditor;
+  setDialog.close();
+  const ok = await confirmDialog("Diesen Satz löschen?", { confirmLabel: "Löschen", danger: true });
+  if (!ok) return;
+  const exercise = getWorkoutByCtx(editor.ctx)?.exercises.find((item) => item.id === editor.exerciseId);
+  if (!exercise) return;
+  exercise.sets = exercise.sets.filter((item) => item.id !== editor.setId);
+  persistAndRender();
+});
+
+document.getElementById("set-cancel").addEventListener("click", () => setDialog.close());
+
+// ---------- Rest timer ----------
+
+const restTimerEl = document.getElementById("rest-timer");
+const restLabel = document.getElementById("rest-label");
+const restTime = document.getElementById("rest-time");
+const restProgressBar = document.getElementById("rest-progress-bar");
+const restSettingValue = document.getElementById("rest-setting-value");
+let restDoneUntil = 0;
+
+function startRest() {
+  const workout = state.activeWorkout;
+  if (!workout) return;
+  workout.restTotalSec = state.settings.restSeconds;
+  workout.restEndsAt = Date.now() + state.settings.restSeconds * 1000;
+  restDoneUntil = 0;
+}
+
+function adjustRest(deltaSec) {
+  const workout = state.activeWorkout;
+  if (!workout?.restEndsAt) return;
+  workout.restEndsAt += deltaSec * 1000;
+  workout.restTotalSec = Math.max(workout.restTotalSec + deltaSec, 1);
+  saveState();
+  updateRestTimer();
+}
+
+function skipRest() {
+  const workout = state.activeWorkout;
+  if (!workout) return;
+  workout.restEndsAt = null;
+  restDoneUntil = 0;
+  saveState();
+  updateRestTimer();
+}
+
+function updateRestTimer() {
+  const workout = state.activeWorkout;
+  const now = Date.now();
+  if (workout?.restEndsAt) {
+    const remaining = workout.restEndsAt - now;
+    if (remaining <= 0) {
+      workout.restEndsAt = null;
+      saveState();
+      restDoneUntil = now + 4000;
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    } else {
+      restTimerEl.hidden = false;
+      restTimerEl.classList.remove("is-finished");
+      restLabel.textContent = "Pause";
+      restTime.textContent = formatClock(remaining + 999);
+      restProgressBar.style.width = `${Math.min(100, (remaining / (workout.restTotalSec * 1000)) * 100)}%`;
+      document.body.classList.add("rest-active");
+      return;
+    }
+  }
+  if (now < restDoneUntil) {
+    restTimerEl.hidden = false;
+    restTimerEl.classList.add("is-finished");
+    restLabel.textContent = "Pause vorbei";
+    restTime.textContent = "Weiter geht's";
+    restProgressBar.style.width = "0%";
+    document.body.classList.add("rest-active");
+    return;
+  }
+  restTimerEl.hidden = true;
+  document.body.classList.remove("rest-active");
+}
+
+function changeRestSetting(deltaSec) {
+  state.settings.restSeconds = Math.min(600, Math.max(15, state.settings.restSeconds + deltaSec));
+  saveState();
+  renderRestSetting();
+}
+
+function renderRestSetting() {
+  restSettingValue.textContent = formatClock(state.settings.restSeconds * 1000);
+}
+
+document.getElementById("rest-minus").addEventListener("click", () => adjustRest(-15));
+document.getElementById("rest-plus").addEventListener("click", () => adjustRest(15));
+document.getElementById("rest-skip").addEventListener("click", skipRest);
+document.getElementById("rest-setting-minus").addEventListener("click", () => changeRestSetting(-15));
+document.getElementById("rest-setting-plus").addEventListener("click", () => changeRestSetting(15));
+
+// ---------- Workout screen exercises ----------
+
+const workoutExercisesEl = document.getElementById("workout-exercises");
+const workoutEmpty = document.getElementById("workout-empty");
+
+function renderWorkoutExercises() {
+  const workout = state.activeWorkout;
+  if (!workout) {
+    workoutExercisesEl.innerHTML = "";
+    return;
+  }
+  renderExerciseList(workoutExercisesEl, workout, { kind: "active" });
+  workoutEmpty.hidden = workout.exercises.length > 0;
+  renderRestSetting();
+}
+
+document.getElementById("add-exercise-btn").addEventListener("click", () => openExerciseDialog({ kind: "active" }));
 
 // ---------- Wake Lock ----------
 
@@ -919,6 +1515,7 @@ function renderAll() {
 
 function tick() {
   updateTimers();
+  updateRestTimer();
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -951,6 +1548,9 @@ window.addEventListener("storage", (event) => {
   renderAll();
 });
 
-setInterval(tick, 500);
+if (state.activeWorkout?.restEndsAt && state.activeWorkout.restEndsAt < Date.now()) {
+  state.activeWorkout.restEndsAt = null;
+}
+setInterval(tick, 250);
 renderAll();
 syncWakeLock();

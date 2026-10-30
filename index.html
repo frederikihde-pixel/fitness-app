@@ -46,7 +46,24 @@
           <button type="button" id="pause-btn" class="icon-btn icon-btn-accent" aria-label="Workout pausieren"></button>
         </div>
 
-        <div id="workout-exercises"></div>
+        <div id="workout-exercises" class="exercise-list"></div>
+        <div id="workout-empty" class="empty-state">
+          <p class="empty-title">Noch keine Übungen</p>
+          <p>Füge deine erste Übung hinzu – aus deinen bisherigen Übungen oder neu angelegt.</p>
+        </div>
+        <button type="button" id="add-exercise-btn" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
+
+        <div class="card settings-card">
+          <div class="settings-text">
+            <span class="settings-label">Pausenzeit</span>
+            <span class="settings-sub">startet beim Abhaken eines Satzes</span>
+          </div>
+          <div class="stepper stepper-compact">
+            <button type="button" id="rest-setting-minus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden verringern">−</button>
+            <output id="rest-setting-value" class="stepper-output" aria-live="polite">1:30</output>
+            <button type="button" id="rest-setting-plus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden erhöhen">+</button>
+          </div>
+        </div>
 
         <div class="workout-actions">
           <button type="button" id="finish-workout-btn" class="btn btn-primary btn-block">Workout beenden</button>
@@ -113,6 +130,97 @@
       </div>
     </form>
   </dialog>
+
+  <dialog id="exercise-dialog" class="sheet" aria-labelledby="exercise-dialog-title">
+    <form id="exercise-form" class="sheet-body" novalidate>
+      <h2 id="exercise-dialog-title" class="sheet-title">Übung hinzufügen</h2>
+      <div id="exercise-known-section" class="field-group">
+        <p class="field-caption">Zuletzt benutzt</p>
+        <div id="exercise-known-chips" class="chip-row"></div>
+      </div>
+      <p class="field-caption">Neue Übung anlegen</p>
+      <div class="field-group">
+        <label for="new-exercise-name">Name</label>
+        <input type="text" id="new-exercise-name" autocomplete="off" maxlength="40" placeholder="z. B. Bankdrücken">
+      </div>
+      <fieldset id="type-picker" class="type-picker">
+        <legend>Typ</legend>
+        <label class="type-option"><input type="radio" name="exercise-type" value="strength" checked><span><strong>Kraft</strong><small>Gewicht und Wiederholungen</small></span></label>
+        <label class="type-option"><input type="radio" name="exercise-type" value="bodyweight"><span><strong>Eigengewicht</strong><small>Nur Wiederholungen</small></span></label>
+        <label class="type-option"><input type="radio" name="exercise-type" value="endurance"><span><strong>Ausdauer</strong><small>Distanz und Zeit, mit Tempo</small></span></label>
+        <label class="type-option"><input type="radio" name="exercise-type" value="timed"><span><strong>Zeitbasiert</strong><small>Nur Dauer, z. B. Plank</small></span></label>
+      </fieldset>
+      <p id="exercise-hint" class="muted-small"></p>
+      <p id="exercise-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="exercise-cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" class="btn btn-primary">Hinzufügen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="set-dialog" class="sheet" aria-labelledby="set-dialog-title">
+    <form id="set-form" class="sheet-body" novalidate>
+      <div>
+        <h2 id="set-dialog-title" class="sheet-title"></h2>
+        <p id="set-dialog-last" class="muted-small"></p>
+      </div>
+      <div class="field-group" data-field="weight">
+        <label for="set-weight">Gewicht (kg)</label>
+        <div class="stepper">
+          <button type="button" class="stepper-btn" data-step-target="set-weight" data-step="-2.5" aria-label="Gewicht um 2,5 kg verringern">−</button>
+          <input type="text" id="set-weight" inputmode="decimal" autocomplete="off">
+          <button type="button" class="stepper-btn" data-step-target="set-weight" data-step="2.5" aria-label="Gewicht um 2,5 kg erhöhen">+</button>
+        </div>
+      </div>
+      <div class="field-group" data-field="reps">
+        <label for="set-reps">Wiederholungen</label>
+        <div class="stepper">
+          <button type="button" class="stepper-btn" data-step-target="set-reps" data-step="-1" aria-label="Eine Wiederholung weniger">−</button>
+          <input type="text" id="set-reps" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
+          <button type="button" class="stepper-btn" data-step-target="set-reps" data-step="1" aria-label="Eine Wiederholung mehr">+</button>
+        </div>
+      </div>
+      <div class="field-group" data-field="distance">
+        <label for="set-distance">Distanz (km)</label>
+        <input type="text" id="set-distance" inputmode="decimal" autocomplete="off" placeholder="z. B. 5,2">
+      </div>
+      <div class="field-group" data-field="time">
+        <label for="set-time">Zeit (Minuten oder mm:ss)</label>
+        <input type="text" id="set-time" inputmode="decimal" autocomplete="off" placeholder="z. B. 28:30">
+        <p id="set-pace" class="muted-small" aria-live="polite"></p>
+      </div>
+      <div class="field-group" data-field="duration">
+        <label for="set-duration">Dauer (Sekunden oder m:ss)</label>
+        <div class="stepper">
+          <button type="button" class="stepper-btn" data-step-target="set-duration" data-step="-5" aria-label="Dauer um 5 Sekunden verringern">−</button>
+          <input type="text" id="set-duration" inputmode="numeric" autocomplete="off">
+          <button type="button" class="stepper-btn" data-step-target="set-duration" data-step="5" aria-label="Dauer um 5 Sekunden erhöhen">+</button>
+        </div>
+      </div>
+      <p id="set-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="set-cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+      </div>
+      <button type="button" id="set-delete" class="btn btn-ghost-danger btn-block">Satz löschen</button>
+    </form>
+  </dialog>
+
+  <div id="rest-timer" class="rest-timer" role="timer" aria-label="Pausen-Timer" hidden>
+    <div class="rest-progress" aria-hidden="true"><div id="rest-progress-bar" class="rest-progress-bar"></div></div>
+    <div class="rest-row">
+      <div class="rest-text">
+        <span id="rest-label" class="rest-label">Pause</span>
+        <span id="rest-time" class="rest-time">1:30</span>
+      </div>
+      <div class="rest-controls">
+        <button type="button" id="rest-minus" class="icon-btn" aria-label="Pause um 15 Sekunden verkürzen">−15</button>
+        <button type="button" id="rest-plus" class="icon-btn" aria-label="Pause um 15 Sekunden verlängern">+15</button>
+        <button type="button" id="rest-skip" class="btn btn-secondary rest-skip">Weiter</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
