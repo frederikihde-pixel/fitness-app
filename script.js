@@ -1,4 +1,246 @@
-const STORAGE_KEY = "fitness-tracker-entries";
+const DATA_KEY = "fitness-tracker-data";
+const LEGACY_KEY = "fitness-tracker-entries";
+const DATA_VERSION = 2;
+
+const UNITS = { weight: "kg", distance: "km" };
+
+const EXERCISE_TYPES = {
+  strength: { label: "Kraft" },
+  bodyweight: { label: "Eigengewicht" },
+  endurance: { label: "Ausdauer" },
+  timed: { label: "Zeitbasiert" },
+};
+
+// Each entry migrates data from version N to N + 1.
+const MIGRATIONS = {
+  1: migrateV1toV2,
+};
+
+const appBanner = document.getElementById("app-banner");
+
+function showBanner(message) {
+  appBanner.textContent = message;
+  appBanner.hidden = false;
+}
+
+const storage = {
+  available: (() => {
+    try {
+      const probe = "__fitness_probe__";
+      localStorage.setItem(probe, "1");
+      localStorage.removeItem(probe);
+      return true;
+    } catch {
+      return false;
+    }
+  })(),
+  get(key) {
+    if (!this.available) return null;
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key, value) {
+    if (!this.available) return false;
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
+
+function createId(prefix) {
+  const random =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${random}`;
+}
+
+function emptyState() {
+  return {
+    version: DATA_VERSION,
+    exercises: {},
+    workouts: [],
+    templates: [],
+    activeWorkout: null,
+    settings: { restSeconds: 90 },
+  };
+}
+
+function formatWorkoutDefaultName(timestamp) {
+  return new Date(timestamp).toLocaleDateString("de-DE", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function inferLegacyTypes(legacyEntries) {
+  const counts = {};
+  for (const entry of legacyEntries) {
+    const name = normalizeExerciseName(entry.exercise);
+    const c = counts[name] || (counts[name] = { reps: 0, distance: 0, duration: 0 });
+    if (entry.reps) c.reps += 1;
+    if (entry.distance) c.distance += 1;
+    if (entry.duration) c.duration += 1;
+  }
+  const types = {};
+  for (const [name, c] of Object.entries(counts)) {
+    if (c.distance > 0 && c.distance >= c.reps) types[name] = "endurance";
+    else if (c.reps === 0 && c.duration > 0) types[name] = "timed";
+    else types[name] = "bodyweight";
+  }
+  return types;
+}
+
+// v1 = flat list of { exercise, reps, distance, duration (min), date }.
+// Every old entry becomes one finished workout with one exercise and one set.
+function migrateV1toV2(data) {
+  const legacy = (Array.isArray(data.entries) ? data.entries : []).filter(
+    (entry) => entry && typeof entry.exercise === "string" && entry.exercise.trim() && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)
+  );
+  const next = emptyState();
+  const types = inferLegacyTypes(legacy);
+  for (const [name, type] of Object.entries(types)) {
+    next.exercises[name] = { type };
+  }
+
+  legacy.forEach((entry, index) => {
+    const name = normalizeExerciseName(entry.exercise);
+    const startedAt = new Date(entry.date + "T12:00:00").getTime();
+    const durationSec = Number(entry.duration) > 0 ? Math.round(Number(entry.duration) * 60) : null;
+    next.workouts.push({
+      id: `w-legacy-${entry.id ?? index}-${index}`,
+      name: formatWorkoutDefaultName(startedAt),
+      startedAt,
+      endedAt: startedAt + (durationSec ? durationSec * 1000 : 0),
+      pausedMs: 0,
+      migrated: true,
+      exercises: [
+        {
+          id: `e-legacy-${index}`,
+          name,
+          sets: [
+            {
+              id: `s-legacy-${index}`,
+              weight: null,
+              reps: Number(entry.reps) > 0 ? Number(entry.reps) : null,
+              distance: Number(entry.distance) > 0 ? Number(entry.distance) : null,
+              durationSec,
+              done: true,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  next.workouts.sort((a, b) => a.startedAt - b.startedAt);
+  return next;
+}
+
+function backupCorruptData(raw) {
+  storage.set(`${DATA_KEY}-defekt-${Date.now()}`, raw);
+}
+
+function loadState() {
+  let data = null;
+  const raw = storage.get(DATA_KEY);
+
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+      if (!data || typeof data !== "object" || typeof data.version !== "number") throw new Error("invalid");
+    } catch {
+      backupCorruptData(raw);
+      showBanner("Die gespeicherten Daten waren beschädigt. Eine Kopie wurde gesichert, die App startet mit leeren Daten.");
+      data = null;
+    }
+  }
+
+  if (!data) {
+    const legacyRaw = storage.get(LEGACY_KEY);
+    let legacyEntries = [];
+    if (legacyRaw) {
+      try {
+        const parsed = JSON.parse(legacyRaw);
+        if (Array.isArray(parsed)) legacyEntries = parsed;
+      } catch {
+        showBanner("Alte Einträge konnten nicht gelesen werden. Sie bleiben unverändert im Speicher erhalten.");
+      }
+    }
+    data = legacyEntries.length > 0 ? { version: 1, entries: legacyEntries } : emptyState();
+  }
+
+  if (data.version > DATA_VERSION) {
+    showBanner("Diese Daten stammen aus einer neueren Version der App. Einige Inhalte werden eventuell nicht angezeigt.");
+  }
+
+  const startVersion = data.version;
+  while (data.version < DATA_VERSION) {
+    data = MIGRATIONS[data.version](data);
+  }
+
+  const loaded = { ...emptyState(), ...data, settings: { ...emptyState().settings, ...data.settings } };
+  if (startVersion !== loaded.version) {
+    state = loaded;
+    saveState();
+  }
+  return loaded;
+}
+
+function saveState() {
+  if (!storage.available) return false;
+  const ok = storage.set(DATA_KEY, JSON.stringify(state));
+  if (!ok) {
+    showBanner("Speichern fehlgeschlagen: Der Browser-Speicher ist voll oder gesperrt. Neue Eingaben gehen beim Schließen verloren.");
+  }
+  return ok;
+}
+
+let state = null;
+if (!storage.available) {
+  showBanner("Dein Browser erlaubt keinen lokalen Speicher (z. B. privater Modus). Die App funktioniert, aber Daten gehen beim Schließen verloren.");
+}
+state = loadState();
+
+function workoutDateStr(workout) {
+  return toDateStr(new Date(workout.startedAt));
+}
+
+function getExerciseType(name) {
+  return state.exercises[name]?.type || "bodyweight";
+}
+
+// Flattens workouts into one entry per exercise per workout for the weekly overview and statistics.
+function loadEntries() {
+  const entries = [];
+  for (const workout of state.workouts) {
+    const date = workoutDateStr(workout);
+    workout.exercises.forEach((exercise, index) => {
+      const sets = exercise.sets.filter((set) => !set.planned);
+      if (sets.length === 0) return;
+      const sum = (key) => sets.reduce((total, set) => total + (Number(set[key]) || 0), 0);
+      const durationSec = sum("durationSec");
+      entries.push({
+        id: workout.startedAt + index,
+        workoutId: workout.id,
+        exercise: exercise.name,
+        reps: sum("reps") || null,
+        distance: roundTo(sum("distance"), 2) || null,
+        duration: durationSec ? roundTo(durationSec / 60, 1) : null,
+        date,
+      });
+    });
+  }
+  return entries;
+}
 
 const form = document.getElementById("entry-form");
 const dateInput = document.getElementById("date");
@@ -33,19 +275,6 @@ resetDateToToday();
 
 function resetDateToToday() {
   dateInput.valueAsDate = new Date();
-}
-
-function loadEntries() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveEntries(entries) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
 function normalizeExerciseName(name) {
@@ -87,12 +316,15 @@ function formatShortDate(dateStr) {
 
 function computeWeeklyTotals(entries) {
   const totals = {};
+  const workoutsPerWeek = {};
   for (const entry of entries) {
     const weekKey = getIsoWeekKey(entry.date);
     if (!totals[weekKey]) {
       totals[weekKey] = { count: 0, reps: 0, distance: 0, duration: 0 };
+      workoutsPerWeek[weekKey] = new Set();
     }
-    totals[weekKey].count += 1;
+    workoutsPerWeek[weekKey].add(entry.workoutId);
+    totals[weekKey].count = workoutsPerWeek[weekKey].size;
     if (entry.reps) totals[weekKey].reps += Number(entry.reps);
     if (entry.distance) totals[weekKey].distance += Number(entry.distance);
     if (entry.duration) totals[weekKey].duration += Number(entry.duration);
@@ -232,16 +464,16 @@ function renderList() {
     deleteBtn.className = "delete-btn";
     deleteBtn.setAttribute("aria-label", "Eintrag löschen");
     deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12"/></svg>';
-    deleteBtn.addEventListener("click", () => deleteEntry(entry.id));
+    deleteBtn.addEventListener("click", () => deleteWorkout(entry.workoutId));
 
     li.append(main, deleteBtn);
     entryList.appendChild(li);
   }
 }
 
-function deleteEntry(id) {
-  const entries = loadEntries().filter((entry) => entry.id !== id);
-  saveEntries(entries);
+function deleteWorkout(workoutId) {
+  state.workouts = state.workouts.filter((workout) => workout.id !== workoutId);
+  saveState();
   renderList();
   renderWeeklyOverview();
   renderChips();
@@ -309,17 +541,28 @@ form.addEventListener("submit", (event) => {
   const distance = distanceInput.value ? Number(distanceInput.value) : null;
   const duration = durationInput.value ? Number(durationInput.value) : null;
 
-  const entries = loadEntries();
-  const newEntry = {
-    id: Date.now(),
-    exercise: exerciseName,
-    reps: reps > 0 ? reps : null,
-    distance,
-    duration,
-    date,
-  };
-  entries.push(newEntry);
-  saveEntries(entries);
+  if (!state.exercises[exerciseName]) {
+    const type = reps > 0 ? "bodyweight" : distance ? "endurance" : duration ? "timed" : "bodyweight";
+    state.exercises[exerciseName] = { type };
+  }
+  const startedAt = new Date(date + "T12:00:00").getTime();
+  const durationSec = duration ? Math.round(duration * 60) : null;
+  state.workouts.push({
+    id: createId("w"),
+    name: formatWorkoutDefaultName(startedAt),
+    startedAt,
+    endedAt: startedAt + (durationSec ? durationSec * 1000 : 0),
+    pausedMs: 0,
+    exercises: [
+      {
+        id: createId("e"),
+        name: exerciseName,
+        sets: [{ id: createId("s"), weight: null, reps: reps > 0 ? reps : null, distance, durationSec, done: true }],
+      },
+    ],
+  });
+  saveState();
+  const newEntry = { exercise: exerciseName, reps: reps > 0 ? reps : null, distance, duration, date };
 
   selectedExercise = exerciseName;
   isNewExerciseMode = false;

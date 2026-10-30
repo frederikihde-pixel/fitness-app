@@ -27,6 +27,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.banner {
+  margin: 1rem 1.25rem 0;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--danger);
+  background: rgba(255, 138, 122, 0.08);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.banner[hidden] {
+  display: none;
+}
+
 .app-header {
   padding: 2rem 1.25rem 1rem;
   max-width: 480px;
