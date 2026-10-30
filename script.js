@@ -69,7 +69,12 @@ function emptyState() {
     workouts: [],
     routines: [],
     activeWorkout: null,
-    settings: { restSeconds: 90, statPeriod: "3m", weeklyGoal: 3 },
+    settings: {
+      restSeconds: 90,
+      statPeriod: "3m",
+      weeklyGoal: 3,
+      intervalCues: { sound: true, countdown: true, voice: false, vibrate: true },
+    },
   };
 }
 
@@ -472,6 +477,7 @@ function startWorkout(template = null) {
     workout.exercises.push({
       id: createId("e"),
       name: item.name,
+      ...(item.interval ? { interval: { ...item.interval } } : {}),
       sets: item.sets.map((set) => ({ id: createId("s"), ...copySetValues(set), done: false, planned: true })),
     });
   }
@@ -509,6 +515,7 @@ function finalizeActiveWorkout() {
     .map((exercise) => ({
       id: exercise.id,
       name: exercise.name,
+      ...(exercise.interval ? { interval: exercise.interval } : {}),
       sets: exercise.sets.filter((set) => !set.planned).map(({ planned, ...set }) => set),
     }))
     .filter((exercise) => exercise.sets.length > 0);
@@ -531,6 +538,8 @@ function finalizeActiveWorkout() {
 async function finishWorkout() {
   const ok = await confirmDialog("Workout jetzt beenden und speichern?", { confirmLabel: "Beenden" });
   if (!ok || !state.activeWorkout) return;
+  const runningInterval = getRunningIntervalExercise();
+  if (runningInterval) finishInterval(runningInterval, true, { askDistance: false });
   const finished = finalizeActiveWorkout();
   trainingView = "start";
   renderAll();
@@ -661,6 +670,7 @@ function formatSet(set, type) {
     if (set.durationSec) parts.push(`in ${formatClock(set.durationSec * 1000)}`);
     const pace = getPaceSecPerKm(set);
     if (pace) parts.push(`(${formatPace(pace)})`);
+    if (set.interval) parts.push(`· Intervall ${formatIntervalPlan(set.interval)}`);
     return parts.join(" ");
   }
   return formatGenericSet(set);
@@ -898,6 +908,7 @@ function renderExerciseList(container, workout, ctx) {
     actions.appendChild(makeIconButton(TRASH_ICON, `Übung ${exercise.name} entfernen`, () => removeExercise(ctx, exercise.id)));
     head.append(titleWrap, actions);
     card.appendChild(head);
+    if (type === "endurance" && exercise.interval && ctx.kind !== "finished") card.appendChild(buildIntervalPanel(ctx, exercise));
 
     if (exercise.sets.length > 0) {
       const grid = `28px repeat(${fields.length}, minmax(0, 1fr))${ctx.kind === "active" ? " 48px" : ""}`;
@@ -956,6 +967,19 @@ function renderExerciseList(container, workout, ctx) {
     addSetBtn.setAttribute("aria-label", `Satz zu ${exercise.name} hinzufügen`);
     addSetBtn.addEventListener("click", () => addSetInstant(ctx, exercise.id));
     card.appendChild(addSetBtn);
+
+    if (type === "endurance" && !exercise.interval && ctx.kind !== "finished") {
+      const planBtn = document.createElement("button");
+      planBtn.type = "button";
+      planBtn.className = "btn btn-secondary btn-block add-set-btn";
+      planBtn.textContent = "+ Intervall-Plan";
+      planBtn.setAttribute("aria-label", `Intervall-Plan zu ${exercise.name} hinzufügen`);
+      planBtn.addEventListener("click", () => {
+        exercise.interval = { ...DEFAULT_INTERVAL_PLAN };
+        persistAndRender();
+      });
+      card.appendChild(planBtn);
+    }
 
     container.appendChild(card);
   });
@@ -1530,6 +1554,7 @@ templateForm.addEventListener("submit", (event) => {
       .map((exercise) => ({
         id: createId("e"),
         name: exercise.name,
+        ...(exercise.interval ? { interval: { ...exercise.interval } } : {}),
         sets: getRealSets(exercise).map((set) => ({ id: createId("s"), ...copySetValues(set) })),
       })),
   };
@@ -1645,7 +1670,9 @@ function repeatLastWorkout() {
   startWorkout({
     id: last.routineId || null,
     name: keepsDateName ? null : last.name,
-    exercises: last.exercises.map((exercise) => ({ name: exercise.name, sets: getRealSets(exercise) })).filter((exercise) => exercise.sets.length > 0),
+    exercises: last.exercises
+      .map((exercise) => ({ name: exercise.name, interval: exercise.interval, sets: getRealSets(exercise) }))
+      .filter((exercise) => exercise.sets.length > 0),
   });
 }
 
@@ -1686,8 +1713,9 @@ function renderRoutineEditor() {
 }
 
 function cloneExercisesWithNewIds(exercises) {
-  return exercises.map((exercise) => ({
+  return exercises.map(({ intervalRun, ...exercise }) => ({
     ...exercise,
+    ...(exercise.interval ? { interval: { ...exercise.interval } } : {}),
     id: createId("e"),
     sets: exercise.sets.map((set) => ({ id: createId("s"), ...copySetValues(set) })),
   }));
@@ -2621,6 +2649,7 @@ function formatDateTime(timestamp) {
 
 function renderDataTab() {
   renderRestSetting();
+  renderCueSettings();
   document.getElementById("goal-value").textContent = String(getWeeklyGoal());
   renderManageList();
   document.getElementById("backup-status").textContent = state.settings.lastExportAt
@@ -2876,6 +2905,464 @@ manageForm.addEventListener("submit", (event) => {
 
 document.getElementById("manage-cancel").addEventListener("click", () => manageDialog.close());
 
+// ---------- Interval mode for endurance exercises ----------
+
+const DEFAULT_INTERVAL_PLAN = { warmupOn: true, warmupSec: 300, workSec: 45, restSec: 120, rounds: 6, cooldownOn: true, cooldownSec: 300 };
+const DEFAULT_CUES = { sound: true, countdown: true, voice: false, vibrate: true };
+const PHASE_LABELS = { warmup: "Aufwärmen", work: "Schnell", rest: "Locker", cooldown: "Auslaufen", done: "Fertig" };
+
+function getIntervalPhases(plan) {
+  const phases = [];
+  if (plan.warmupOn) phases.push({ kind: "warmup", label: PHASE_LABELS.warmup, sec: plan.warmupSec });
+  for (let round = 1; round <= plan.rounds; round += 1) {
+    phases.push({ kind: "work", label: PHASE_LABELS.work, sec: plan.workSec, round });
+    phases.push({ kind: "rest", label: PHASE_LABELS.rest, sec: plan.restSec, round });
+  }
+  if (plan.cooldownOn) phases.push({ kind: "cooldown", label: PHASE_LABELS.cooldown, sec: plan.cooldownSec });
+  return phases;
+}
+
+function getPlanTotalSec(plan) {
+  return getIntervalPhases(plan).reduce((total, phase) => total + phase.sec, 0);
+}
+
+function formatIntervalPlan(plan) {
+  return `${plan.rounds} × ${formatClock(plan.workSec * 1000)} / ${formatClock(plan.restSec * 1000)}`;
+}
+
+// Position in the plan derived only from timestamps: start, paused time and skipped time.
+function getIntervalProgress(run, plan, now = Date.now()) {
+  const phases = getIntervalPhases(plan);
+  const totalMs = getPlanTotalSec(plan) * 1000;
+  const elapsedMs = Math.max(0, (run.pausedAt ?? now) - run.startedAt - run.pausedMs + run.skipMs);
+  let phaseEnd = 0;
+  for (let index = 0; index < phases.length; index += 1) {
+    phaseEnd += phases[index].sec * 1000;
+    if (elapsedMs < phaseEnd) {
+      return { done: false, index, phase: phases[index], next: phases[index + 1] || null, remainingMs: phaseEnd - elapsedMs, elapsedMs, totalMs };
+    }
+  }
+  return { done: true, elapsedMs: totalMs, totalMs };
+}
+
+// ----- Plan editor inside an endurance exercise card -----
+
+const PLAN_ROWS = [
+  { key: "warmupSec", toggle: "warmupOn", label: "Aufwärmen", step: 15, min: 15 },
+  { key: "workSec", label: "Schnell", step: 5, min: 5 },
+  { key: "restSec", label: "Locker", step: 15, min: 5 },
+  { key: "rounds", label: "Runden", step: 1, min: 1, max: 50, count: true },
+  { key: "cooldownSec", toggle: "cooldownOn", label: "Auslaufen", step: 15, min: 15 },
+];
+
+function buildIntervalPanel(ctx, exercise) {
+  const plan = exercise.interval;
+  const panel = document.createElement("section");
+  panel.className = "interval-panel";
+  panel.setAttribute("aria-label", `Intervall-Plan für ${exercise.name}`);
+
+  const head = document.createElement("div");
+  head.className = "interval-panel-head";
+  const title = document.createElement("span");
+  title.className = "interval-panel-title";
+  title.textContent = "Intervall-Plan";
+  const total = document.createElement("span");
+  total.className = "interval-panel-total";
+  const updateTotal = () => (total.textContent = `Gesamt ${formatClock(getPlanTotalSec(plan) * 1000)}`);
+  updateTotal();
+  head.append(title, total, makeIconButton(TRASH_ICON, `Intervall-Plan für ${exercise.name} entfernen`, () => {
+    const removed = exercise.interval;
+    delete exercise.interval;
+    persistAndRender();
+    showUndoToast("Intervall-Plan entfernt", () => {
+      const target = getWorkoutByCtx(ctx)?.exercises.find((item) => item.id === exercise.id);
+      if (!target) return;
+      target.interval = removed;
+      persistAndRender();
+    });
+  }));
+  panel.appendChild(head);
+
+  for (const row of PLAN_ROWS) {
+    const line = document.createElement("div");
+    line.className = "plan-row";
+    const labelWrap = document.createElement(row.toggle ? "label" : "span");
+    labelWrap.className = "plan-label";
+    let toggle = null;
+    if (row.toggle) {
+      toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.className = "plan-check";
+      toggle.checked = Boolean(plan[row.toggle]);
+      toggle.setAttribute("aria-label", `${row.label} verwenden`);
+      labelWrap.appendChild(toggle);
+    }
+    labelWrap.append(document.createTextNode(row.label));
+
+    const stepper = document.createElement("div");
+    stepper.className = "mini-stepper plan-stepper";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "set-input";
+    input.inputMode = "numeric";
+    input.autocomplete = "off";
+    input.setAttribute("aria-label", row.count ? `Anzahl ${row.label}` : `${row.label} in Minuten und Sekunden`);
+    const show = () => (input.value = row.count ? String(plan[row.key]) : formatClock(plan[row.key] * 1000));
+    show();
+    const commit = (value) => {
+      plan[row.key] = Math.min(row.max ?? 5999, Math.max(row.min, Math.round(value)));
+      show();
+      updateTotal();
+      saveState();
+    };
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") input.blur();
+    });
+    input.addEventListener("change", () => {
+      const value = row.count ? parseDecimal(input.value) : parseDurationInput(input.value, "sec");
+      if (Number.isFinite(value) && value > 0) commit(value);
+      else show();
+    });
+    const makeStep = (direction) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mini-step";
+      button.textContent = direction < 0 ? "−" : "+";
+      const amount = row.count ? "1" : `${row.step} Sekunden`;
+      button.setAttribute("aria-label", `${row.label} um ${amount} ${direction < 0 ? "verringern" : "erhöhen"}`);
+      button.addEventListener("click", () => commit(plan[row.key] + direction * row.step));
+      return button;
+    };
+    const minus = makeStep(-1);
+    const plus = makeStep(1);
+    stepper.append(minus, input, plus);
+
+    const setEnabled = (enabled) => {
+      [input, minus, plus].forEach((element) => (element.disabled = !enabled));
+      stepper.classList.toggle("is-disabled", !enabled);
+    };
+    if (toggle) {
+      setEnabled(toggle.checked);
+      toggle.addEventListener("change", () => {
+        plan[row.toggle] = toggle.checked;
+        setEnabled(toggle.checked);
+        updateTotal();
+        saveState();
+      });
+    }
+    line.append(labelWrap, stepper);
+    panel.appendChild(line);
+  }
+
+  if (ctx.kind === "active") {
+    const start = document.createElement("button");
+    start.type = "button";
+    start.className = "btn btn-secondary btn-block interval-start-btn";
+    start.textContent = "Intervall starten";
+    start.addEventListener("click", () => startInterval(exercise.id));
+    panel.appendChild(start);
+  }
+  return panel;
+}
+
+// ----- Cues: Web Audio tones, countdown, speech and vibration -----
+
+let audioCtx = null;
+
+function getCues() {
+  return { ...DEFAULT_CUES, ...(state.settings.intervalCues || {}) };
+}
+
+function audioReady() {
+  return Boolean(audioCtx) && audioCtx.state === "running";
+}
+
+// Browsers only allow sound after a tap, so this runs inside the start (or "Töne aktivieren") tap.
+function unlockCues() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const cues = getCues();
+  if (AudioContextClass && (cues.sound || cues.countdown)) {
+    try {
+      if (!audioCtx) audioCtx = new AudioContextClass();
+      if (audioCtx.state === "suspended") audioCtx.resume().then(renderIntervalScreen, () => {});
+      playTone(440, 0, 0.03, 0.0002);
+    } catch {
+      audioCtx = null;
+    }
+  }
+  if (cues.voice && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    } catch {
+      // Speech is optional.
+    }
+  }
+}
+
+function playTone(frequency, offset, duration, gain = 0.25) {
+  if (!audioReady()) return;
+  const oscillator = audioCtx.createOscillator();
+  const volume = audioCtx.createGain();
+  const start = audioCtx.currentTime + offset;
+  oscillator.type = "sine";
+  oscillator.frequency.value = frequency;
+  volume.gain.setValueAtTime(0.0001, start);
+  volume.gain.exponentialRampToValueAtTime(gain, start + 0.01);
+  volume.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(volume).connect(audioCtx.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+
+const PHASE_TONES = {
+  warmup: [[660, 0, 0.25]],
+  work: [[880, 0, 0.14], [1175, 0.17, 0.24]],
+  rest: [[523, 0, 0.35]],
+  cooldown: [[660, 0, 0.25]],
+  done: [[523, 0, 0.14], [659, 0.17, 0.14], [784, 0.34, 0.3]],
+};
+
+function firePhaseCue(kind) {
+  const cues = getCues();
+  if (cues.sound) PHASE_TONES[kind].forEach(([frequency, offset, duration]) => playTone(frequency, offset, duration));
+  if (cues.voice && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(PHASE_LABELS[kind]);
+      utterance.lang = "de-DE";
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      // Speech is optional.
+    }
+  }
+  if (cues.vibrate && navigator.vibrate) navigator.vibrate(kind === "work" ? [150, 80, 150] : 250);
+}
+
+function fireCountdownCue() {
+  if (getCues().countdown) playTone(740, 0, 0.09, 0.18);
+}
+
+// ----- Running an interval -----
+
+const intervalScreen = document.getElementById("interval-screen");
+const intervalPauseBtn = document.getElementById("interval-pause");
+const intervalUnlockBtn = document.getElementById("interval-unlock");
+let intervalCue = null;
+
+function getRunningIntervalExercise() {
+  return state.activeWorkout?.exercises.find((exercise) => exercise.intervalRun && exercise.interval) || null;
+}
+
+function startInterval(exerciseId) {
+  const exercise = state.activeWorkout?.exercises.find((item) => item.id === exerciseId);
+  if (!exercise?.interval) return;
+  if (getRunningIntervalExercise()) {
+    showToast("Es läuft schon ein Intervall.");
+    return;
+  }
+  unlockCues();
+  exercise.intervalRun = { id: createId("iv"), startedAt: Date.now(), pausedAt: null, pausedMs: 0, skipMs: 0 };
+  saveState();
+  intervalCue = { runId: exercise.intervalRun.id, phase: 0, beeped: new Set() };
+  firePhaseCue(getIntervalPhases(exercise.interval)[0].kind);
+  renderIntervalScreen();
+  syncWakeLock();
+}
+
+function processIntervalCues(info, run) {
+  if (!intervalCue || intervalCue.runId !== run.id) {
+    // First frame after a reload: remember the position without replaying cues.
+    intervalCue = { runId: run.id, phase: info.index, beeped: new Set() };
+    return;
+  }
+  if (info.index !== intervalCue.phase) {
+    intervalCue.phase = info.index;
+    firePhaseCue(info.phase.kind);
+  }
+  if (run.pausedAt) return;
+  const secondsLeft = Math.ceil(info.remainingMs / 1000);
+  const key = `${info.index}:${secondsLeft}`;
+  if (secondsLeft >= 1 && secondsLeft <= 3 && info.phase.sec > 3 && !intervalCue.beeped.has(key)) {
+    intervalCue.beeped.add(key);
+    fireCountdownCue();
+  }
+}
+
+function renderIntervalScreen() {
+  const exercise = getRunningIntervalExercise();
+  intervalScreen.hidden = !exercise;
+  document.body.classList.toggle("interval-open", Boolean(exercise));
+  if (!exercise) return;
+  // Keep the workout underneath, so ending the interval (also after a reload) returns to it.
+  if (trainingView !== "workout" || currentTab !== "training") {
+    trainingView = "workout";
+    switchTab("training");
+  }
+  const run = exercise.intervalRun;
+  const plan = exercise.interval;
+  const info = getIntervalProgress(run, plan);
+  if (info.done) {
+    finishInterval(exercise, false);
+    return;
+  }
+  processIntervalCues(info, run);
+
+  intervalScreen.dataset.phase = info.phase.kind;
+  document.getElementById("interval-exercise").textContent = exercise.name;
+  document.getElementById("interval-round").textContent = info.phase.round
+    ? `Runde ${info.phase.round} von ${plan.rounds}`
+    : info.phase.kind === "warmup"
+      ? `Danach ${plan.rounds} Runden`
+      : "Alle Runden geschafft";
+  document.getElementById("interval-phase").textContent = info.phase.label;
+  document.getElementById("interval-remaining").textContent = formatClock(Math.ceil(info.remainingMs / 1000) * 1000);
+  document.getElementById("interval-progress-bar").style.width = `${Math.min(100, (info.elapsedMs / info.totalMs) * 100)}%`;
+  document.getElementById("interval-total").textContent = `${formatClock(info.elapsedMs)} von ${formatClock(info.totalMs)}`;
+  document.getElementById("interval-next").textContent = info.next
+    ? `Danach: ${info.next.label} ${formatClock(info.next.sec * 1000)}`
+    : "Danach: fertig";
+  const paused = Boolean(run.pausedAt);
+  document.getElementById("interval-paused").hidden = !paused;
+  intervalScreen.classList.toggle("is-paused", paused);
+  intervalPauseBtn.textContent = paused ? "Fortsetzen" : "Pause";
+  const cues = getCues();
+  intervalUnlockBtn.hidden = !(cues.sound || cues.countdown) || audioReady() || !(window.AudioContext || window.webkitAudioContext);
+}
+
+function toggleIntervalPause() {
+  const run = getRunningIntervalExercise()?.intervalRun;
+  if (!run) return;
+  const now = Date.now();
+  if (run.pausedAt) {
+    run.pausedMs += now - run.pausedAt;
+    run.pausedAt = null;
+  } else {
+    run.pausedAt = now;
+  }
+  saveState();
+  renderIntervalScreen();
+}
+
+function skipIntervalPhase() {
+  const exercise = getRunningIntervalExercise();
+  if (!exercise) return;
+  const info = getIntervalProgress(exercise.intervalRun, exercise.interval);
+  if (info.done) return;
+  exercise.intervalRun.skipMs += info.remainingMs;
+  saveState();
+  renderIntervalScreen();
+}
+
+let intervalResultSetId = null;
+
+// Saves the interval as one endurance set. A completed plan counts its planned time minus skipped
+// time; an early stop counts the real time without pauses.
+function finishInterval(exercise, endedEarly, { askDistance = true } = {}) {
+  const run = exercise.intervalRun;
+  const plan = exercise.interval;
+  const totalMs = getPlanTotalSec(plan) * 1000;
+  const activeMs = endedEarly
+    ? Math.max(0, (run.pausedAt ?? Date.now()) - run.startedAt - run.pausedMs)
+    : Math.max(0, totalMs - run.skipMs);
+  const cueThisRun = intervalCue?.runId === run.id;
+  delete exercise.intervalRun;
+  intervalCue = null;
+  if (activeMs < 1000) {
+    saveState();
+    renderAll();
+    syncWakeLock();
+    return;
+  }
+  exercise.sets = exercise.sets.filter((set) => !set.planned);
+  const set = {
+    id: createId("s"),
+    weight: null,
+    reps: null,
+    distance: null,
+    durationSec: Math.round(activeMs / 1000),
+    done: true,
+    interval: { ...plan, skippedSec: Math.round(run.skipMs / 1000), endedEarly },
+  };
+  exercise.sets.push(set);
+  saveState();
+  if (cueThisRun) firePhaseCue("done");
+  renderAll();
+  syncWakeLock();
+  if (askDistance) openIntervalDoneDialog(exercise, set);
+}
+
+const intervalDoneDialog = document.getElementById("interval-done-dialog");
+const intervalDistanceInput = document.getElementById("interval-distance");
+
+function findIntervalResult() {
+  for (const exercise of state.activeWorkout?.exercises || []) {
+    const set = exercise.sets.find((item) => item.id === intervalResultSetId);
+    if (set) return { exercise, set };
+  }
+  return {};
+}
+
+function openIntervalDoneDialog(exercise, set) {
+  intervalResultSetId = set.id;
+  document.getElementById("interval-done-title").textContent = exercise.name;
+  document.getElementById("interval-done-summary").textContent = `Gesamtzeit ${formatClock(set.durationSec * 1000)} · ${formatIntervalPlan(set.interval)}${set.interval.endedEarly ? " · vorzeitig beendet" : ""}`;
+  intervalDistanceInput.value = "";
+  document.getElementById("interval-done-pace").textContent = "";
+  document.getElementById("interval-done-error").textContent = "";
+  if (!intervalDoneDialog.open) intervalDoneDialog.showModal();
+}
+
+intervalDistanceInput.addEventListener("input", () => {
+  const { set } = findIntervalResult();
+  const distance = parseDecimal(intervalDistanceInput.value);
+  const pace = set ? getPaceSecPerKm({ distance, durationSec: set.durationSec }) : null;
+  document.getElementById("interval-done-pace").textContent = pace ? `Tempo: ${formatPace(pace)}` : "";
+});
+
+document.getElementById("interval-done-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const { set } = findIntervalResult();
+  const distance = parseDecimal(intervalDistanceInput.value);
+  if (Number.isNaN(distance) || (distance !== null && distance < 0)) {
+    document.getElementById("interval-done-error").textContent = "Bitte eine gültige Distanz eingeben, z. B. 4,2.";
+    return;
+  }
+  if (set) set.distance = distance > 0 ? roundTo(distance, 2) : null;
+  intervalDoneDialog.close();
+  persistAndRender();
+  showToast("Intervall gespeichert");
+});
+
+document.getElementById("interval-no-distance").addEventListener("click", () => {
+  intervalDoneDialog.close();
+  showToast("Intervall gespeichert");
+});
+
+intervalPauseBtn.addEventListener("click", toggleIntervalPause);
+document.getElementById("interval-skip").addEventListener("click", skipIntervalPhase);
+document.getElementById("interval-end").addEventListener("click", () => {
+  const exercise = getRunningIntervalExercise();
+  if (exercise) finishInterval(exercise, true);
+});
+intervalUnlockBtn.addEventListener("click", () => {
+  unlockCues();
+  renderIntervalScreen();
+});
+
+document.querySelectorAll("[data-cue]").forEach((toggle) => {
+  toggle.addEventListener("change", () => {
+    state.settings.intervalCues = { ...getCues(), [toggle.dataset.cue]: toggle.checked };
+    saveState();
+  });
+});
+
+function renderCueSettings() {
+  const cues = getCues();
+  document.querySelectorAll("[data-cue]").forEach((toggle) => (toggle.checked = Boolean(cues[toggle.dataset.cue])));
+  document.getElementById("cue-vibrate-sub").textContent = navigator.vibrate ? "" : "Dieser Browser kann nicht vibrieren";
+}
+
 // ---------- Wake Lock ----------
 
 const wakeLockSupported = "wakeLock" in navigator;
@@ -2886,7 +3373,9 @@ let wakeLockFailed = false;
 async function syncWakeLock() {
   if (wakeLockBusy) return;
   const shouldHold =
-    Boolean(state.activeWorkout) && !state.activeWorkout.pausedAt && document.visibilityState === "visible";
+    Boolean(state.activeWorkout) &&
+    (!state.activeWorkout.pausedAt || Boolean(getRunningIntervalExercise())) &&
+    document.visibilityState === "visible";
   if (wakeLockSupported) {
     wakeLockBusy = true;
     try {
@@ -2948,11 +3437,13 @@ function renderAll() {
   if (detailDialog.open) renderDetail();
   renderStatistik();
   renderDataTab();
+  renderIntervalScreen();
 }
 
 function tick() {
   updateTimers();
   updateRestTimer();
+  if (!intervalScreen.hidden || getRunningIntervalExercise()) renderIntervalScreen();
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {

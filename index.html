@@ -200,6 +200,26 @@
         </div>
       </div>
 
+      <h2>Intervall-Hinweise</h2>
+      <div class="card settings-list">
+        <label class="setting-row switch-row" for="cue-sound">
+          <span class="settings-text"><span class="settings-label">Ton bei Phasenwechsel</span></span>
+          <input type="checkbox" id="cue-sound" class="switch" data-cue="sound">
+        </label>
+        <label class="setting-row switch-row" for="cue-countdown">
+          <span class="settings-text"><span class="settings-label">Countdown 3, 2, 1</span></span>
+          <input type="checkbox" id="cue-countdown" class="switch" data-cue="countdown">
+        </label>
+        <label class="setting-row switch-row" for="cue-voice">
+          <span class="settings-text"><span class="settings-label">Sprachansage</span><span class="settings-sub">„Schnell“, „Locker“</span></span>
+          <input type="checkbox" id="cue-voice" class="switch" data-cue="voice">
+        </label>
+        <label class="setting-row switch-row" for="cue-vibrate">
+          <span class="settings-text"><span class="settings-label">Vibration</span><span id="cue-vibrate-sub" class="settings-sub"></span></span>
+          <input type="checkbox" id="cue-vibrate" class="switch" data-cue="vibrate">
+        </label>
+      </div>
+
       <h2>Übungen</h2>
       <ul id="manage-exercise-list" class="manage-list"></ul>
       <p id="manage-exercise-empty" class="muted-small">Übungen erscheinen hier, sobald du sie anlegst.</p>
@@ -403,6 +423,50 @@
       <p id="manage-error" class="form-error" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" id="manage-cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="interval-screen" class="interval-screen" role="dialog" aria-modal="true" aria-labelledby="interval-phase" hidden>
+    <div class="interval-top">
+      <p id="interval-exercise" class="interval-exercise"></p>
+      <p id="interval-round" class="interval-round"></p>
+    </div>
+    <div class="interval-main">
+      <p id="interval-phase" class="interval-phase"></p>
+      <p id="interval-remaining" class="interval-remaining" role="timer" aria-live="off">0:00</p>
+      <p id="interval-paused" class="interval-paused" hidden>Pausiert</p>
+      <div class="interval-progress" aria-hidden="true"><div id="interval-progress-bar" class="interval-progress-bar"></div></div>
+      <p id="interval-total" class="interval-total"></p>
+      <p id="interval-next" class="interval-next"></p>
+    </div>
+    <div class="interval-bottom">
+      <button type="button" id="interval-unlock" class="btn btn-secondary btn-block" hidden>Töne aktivieren</button>
+      <p class="interval-hint">Lass den Bildschirm an: Bei gesperrtem Bildschirm kommen Töne nicht zuverlässig.</p>
+      <div class="interval-controls">
+        <button type="button" id="interval-pause" class="btn btn-primary">Pause</button>
+        <button type="button" id="interval-skip" class="btn btn-secondary">Phase überspringen</button>
+      </div>
+      <button type="button" id="interval-end" class="btn btn-ghost-danger btn-block">Beenden</button>
+    </div>
+  </div>
+
+  <dialog id="interval-done-dialog" class="sheet" aria-labelledby="interval-done-title">
+    <form id="interval-done-form" class="sheet-body" novalidate>
+      <div>
+        <p class="card-kicker">Intervall gespeichert</p>
+        <h2 id="interval-done-title" class="sheet-title"></h2>
+        <p id="interval-done-summary" class="muted-small"></p>
+      </div>
+      <div class="field-group">
+        <label for="interval-distance">Distanz in km (optional)</label>
+        <input type="text" id="interval-distance" inputmode="decimal" autocomplete="off" placeholder="z. B. 4,2">
+        <p id="interval-done-pace" class="muted-small" aria-live="polite"></p>
+      </div>
+      <p id="interval-done-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="interval-no-distance" class="btn btn-secondary">Ohne Distanz</button>
         <button type="submit" class="btn btn-primary">Speichern</button>
       </div>
     </form>
