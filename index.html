@@ -18,8 +18,7 @@
 <body>
   <div id="app-banner" class="banner" role="alert" hidden></div>
   <header class="app-header">
-    <p class="eyebrow">Fitness</p>
-    <h1>Dein Training</h1>
+    <h1 id="page-title">Training</h1>
   </header>
 
   <main class="app-main">
@@ -37,7 +36,7 @@
           <ul id="routine-list" class="routine-list"></ul>
           <div id="routines-empty" class="empty-state">
             <p class="empty-title">Noch keine Workouts geplant</p>
-            <p>Lege ein Workout an und plane Übungen und Sätze. Die Zeit läuft erst, wenn du startest.</p>
+            <p>Plane Übungen und Sätze vorab. Die Zeit läuft erst ab „Start“.</p>
           </div>
         </section>
 
@@ -65,7 +64,7 @@
         <div id="routine-exercises" class="exercise-list"></div>
         <div id="routine-empty" class="empty-state">
           <p class="empty-title">Noch keine Übungen</p>
-          <p>Füge Übungen hinzu und plane deine Sätze.</p>
+          <p>Füge die erste Übung hinzu.</p>
         </div>
         <button type="button" id="routine-add-exercise-btn" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
         <div class="workout-actions">
@@ -89,21 +88,9 @@
         <div id="workout-exercises" class="exercise-list"></div>
         <div id="workout-empty" class="empty-state">
           <p class="empty-title">Noch keine Übungen</p>
-          <p>Füge deine erste Übung hinzu – aus deinen bisherigen Übungen oder neu angelegt.</p>
+          <p>Füge die erste Übung hinzu.</p>
         </div>
         <button type="button" id="add-exercise-btn" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
-
-        <div class="card settings-card">
-          <div class="settings-text">
-            <span class="settings-label">Pausenzeit</span>
-            <span class="settings-sub">startet beim Abhaken eines Satzes</span>
-          </div>
-          <div class="stepper stepper-compact">
-            <button type="button" id="rest-setting-minus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden verringern">−</button>
-            <output id="rest-setting-value" class="stepper-output" aria-live="polite">1:30</output>
-            <button type="button" id="rest-setting-plus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden erhöhen">+</button>
-          </div>
-        </div>
 
         <div class="workout-actions">
           <button type="button" id="finish-workout-btn" class="btn btn-primary btn-block">Workout beenden</button>
@@ -114,11 +101,10 @@
     </section>
 
     <section id="liste" class="tab-content">
-      <h2>Workouts</h2>
       <ul id="workout-list" class="workout-list"></ul>
       <div id="history-empty" class="empty-state">
         <p class="empty-title">Noch keine Workouts</p>
-        <p>Starte dein erstes Training im Tab „Training“. Danach findest du es hier mit allen Details.</p>
+        <p>Beendete Workouts erscheinen hier.</p>
         <button type="button" id="history-start-btn" class="btn btn-primary empty-action">Zum Training</button>
       </div>
     </section>
@@ -182,10 +168,25 @@
         <p id="bests-empty" class="muted-small">Noch keine Bestwerte – trage Sätze ein, dann erscheinen sie hier.</p>
       </div>
     </section>
-    <section id="daten" class="tab-content">
+    <section id="mehr" class="tab-content">
+      <h2>Einstellungen</h2>
+      <div class="card settings-list">
+        <div class="setting-row">
+          <div class="settings-text">
+            <span class="settings-label">Pausenzeit</span>
+            <span class="settings-sub">nach einem erledigten Satz</span>
+          </div>
+          <div class="stepper stepper-compact">
+            <button type="button" id="rest-setting-minus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden verringern">−</button>
+            <output id="rest-setting-value" class="stepper-output" aria-live="polite">1:30</output>
+            <button type="button" id="rest-setting-plus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden erhöhen">+</button>
+          </div>
+        </div>
+      </div>
+
       <h2>Backup</h2>
       <div class="card">
-        <p class="card-text">Deine Trainingsdaten liegen nur in diesem Browser. Wenn der Browser-Speicher gelöscht wird oder du das Gerät wechselst, sind sie weg. Exportiere deshalb regelmäßig ein Backup und bewahre die Datei sicher auf.</p>
+        <p class="card-text">Deine Daten liegen nur in diesem Browser. Sichere sie regelmäßig als Datei.</p>
         <p id="backup-status" class="muted-small"></p>
         <button type="button" id="export-btn" class="btn btn-primary btn-block">Daten exportieren</button>
         <button type="button" id="import-btn" class="btn btn-secondary btn-block">Daten importieren</button>
@@ -213,9 +214,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16l4.5-6 4 4L19 6"/><circle cx="19" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg>
       <span>Statistik</span>
     </button>
-    <button type="button" class="nav-btn" data-tab="daten">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 4v11M8 11l4 4 4-4"/></svg>
-      <span>Daten</span>
+    <button type="button" class="nav-btn" data-tab="mehr">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+      <span>Mehr</span>
     </button>
   </nav>
 

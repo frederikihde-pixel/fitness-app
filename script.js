@@ -1332,7 +1332,6 @@ function renderWorkoutExercises() {
   }
   renderExerciseList(workoutExercisesEl, workout, { kind: "active" });
   workoutEmpty.hidden = workout.exercises.length > 0;
-  renderRestSetting();
 }
 
 document.getElementById("add-exercise-btn").addEventListener("click", () => openExerciseDialog({ kind: "active" }));
@@ -1548,6 +1547,7 @@ const routineNameInput = document.getElementById("routine-name");
 const routineExercisesEl = document.getElementById("routine-exercises");
 const routineEmpty = document.getElementById("routine-empty");
 const repeatLastBtn = document.getElementById("repeat-last-btn");
+const newWorkoutBtn = document.getElementById("new-workout-btn");
 
 function getRoutine(id) {
   return state.routines.find((routine) => routine.id === id) || null;
@@ -1570,6 +1570,10 @@ function makeIconButton(icon, label, onClick) {
 function renderRoutines() {
   const last = getLastWorkout();
   repeatLastBtn.hidden = !last || Boolean(state.activeWorkout);
+  const newIsPrimary = state.routines.length === 0 && !state.activeWorkout;
+  newWorkoutBtn.classList.toggle("btn-primary", newIsPrimary);
+  newWorkoutBtn.classList.toggle("btn-secondary", !newIsPrimary);
+  newWorkoutBtn.classList.toggle("btn-dashed", !newIsPrimary);
   if (last) repeatLastBtn.setAttribute("aria-label", `Letztes Training wiederholen: ${last.name}`);
   routineList.innerHTML = "";
   routinesEmpty.hidden = state.routines.length > 0;
@@ -2567,13 +2571,20 @@ function formatDateTime(timestamp) {
 }
 
 function renderDataTab() {
+  renderRestSetting();
   document.getElementById("backup-status").textContent = state.settings.lastExportAt
     ? `Zuletzt exportiert: ${formatDateTime(state.settings.lastExportAt)}`
     : "Noch kein Backup exportiert.";
-  const counts = `${state.workouts.length} Workouts, ${Object.keys(state.exercises).length} Übungen, ${state.routines.length} Vorlagen · Datenformat Version ${state.version}`;
+  const counts = `${state.workouts.length} Workouts · ${Object.keys(state.exercises).length} Übungen · ${state.routines.length} in Meine Workouts`;
+  let safetyCopies = 0;
+  try {
+    safetyCopies = Object.keys(localStorage).filter((key) => key.startsWith(`${DATA_KEY}-sicherung-`) || key.startsWith(`${DATA_KEY}-vor-import-`)).length;
+  } catch {
+    safetyCopies = 0;
+  }
   document.getElementById("storage-info").textContent = storage.available
-    ? `Lokaler Speicher aktiv. Gespeichert: ${counts}.`
-    : `Lokaler Speicher nicht verfügbar – Daten gehen beim Schließen verloren. Aktuell: ${counts}.`;
+    ? `${counts}. Sicherheitskopien: ${safetyCopies}. Datenformat ${state.version}.`
+    : `Kein lokaler Speicher – Daten gehen beim Schließen verloren. ${counts}.`;
 }
 
 function exportData() {
@@ -2727,17 +2738,20 @@ function updateWakeLockHint() {
   const workout = state.activeWorkout;
   let text = "";
   if (workout && !workout.pausedAt) {
-    if (wakeLockSentinel) text = "Der Bildschirm bleibt während des Workouts an.";
-    else if (!wakeLockSupported || wakeLockFailed)
-      text = "Dein Browser kann den Bildschirm nicht wachhalten. Verlängere bei Bedarf die automatische Sperre in den Handy-Einstellungen.";
+    if (wakeLockSentinel) text = "Bildschirm bleibt an.";
+    else if (!wakeLockSupported || wakeLockFailed) text = "Bildschirm kann ausgehen – Sperre im Handy verlängern.";
   }
   wakeLockHint.textContent = text;
 }
 
 // ---------- Navigation and rendering ----------
 
+const PAGE_TITLES = { training: "Training", liste: "Verlauf", statistik: "Statistik", mehr: "Mehr" };
+const pageTitle = document.getElementById("page-title");
+
 function switchTab(tab) {
   currentTab = tab;
+  pageTitle.textContent = PAGE_TITLES[tab];
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     const active = btn.dataset.tab === tab;
     btn.classList.toggle("active", active);

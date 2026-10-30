@@ -47,15 +47,6 @@ body {
   margin: 0 auto;
 }
 
-.eyebrow {
-  margin: 0 0 0.25rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
 .app-header h1 {
   margin: 0;
   font-size: 1.6rem;
@@ -675,15 +666,6 @@ dialog.sheet[open] {
   color: var(--text);
   font-weight: 600;
   font-size: 1rem;
-}
-
-.settings-card {
-  margin-top: 1rem;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.1rem;
-  gap: 0.75rem;
 }
 
 .settings-text {
@@ -1747,4 +1729,36 @@ input.set-input:focus {
 
 .add-set-btn {
   margin-top: 0.1rem;
+}
+
+/* ---------- Settings and consistent section spacing ---------- */
+
+.settings-list {
+  padding: 0.25rem 1.1rem;
+  gap: 0;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+}
+
+.setting-row + .setting-row {
+  border-top: 1px solid var(--border);
+}
+
+.tab-content > h2:first-child,
+.start-section > h2:first-child {
+  margin-top: 0;
+}
+
+#start-screen {
+  gap: 1.5rem;
+}
+
+.app-header {
+  padding-bottom: 1.25rem;
 }
