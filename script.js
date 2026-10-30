@@ -278,11 +278,25 @@ function loadState() {
   }
 
   const loaded = withDefaults(data);
-  if (startVersion !== loaded.version) {
+  let changed = startVersion !== loaded.version;
+  // Saved workouts without a single set (and without a note) carry no data. They are removed once,
+  // after a copy has been written; if the copy fails they are kept.
+  const empties = loaded.workouts.filter(isEmptyWorkout);
+  if (empties.length > 0 && storage.set(`${DATA_KEY}-sicherung-leere-${Date.now()}`, JSON.stringify(empties))) {
+    loaded.workouts = loaded.workouts.filter((workout) => !isEmptyWorkout(workout));
+    changed = true;
+  }
+  if (changed) {
     state = loaded;
     saveState();
   }
   return loaded;
+}
+
+function isEmptyWorkout(workout) {
+  const hasNote = Boolean(workout.notes && workout.notes.trim());
+  const hasSet = (workout.exercises || []).some((exercise) => (exercise.sets || []).some((set) => !set.planned));
+  return !hasNote && !hasSet;
 }
 
 // A migration overwrites the stored data only after a safety copy of the old version has been written.
@@ -409,10 +423,12 @@ function showUndoToast(message, restore) {
 const confirmDialogEl = document.getElementById("confirm-dialog");
 const confirmMessageEl = document.getElementById("confirm-message");
 const confirmOkBtn = document.getElementById("confirm-ok");
+const confirmCancelBtn = document.getElementById("confirm-cancel");
 
-function confirmDialog(message, { confirmLabel = "OK", danger = false } = {}) {
+function confirmDialog(message, { confirmLabel = "OK", cancelLabel = "Abbrechen", danger = false } = {}) {
   confirmMessageEl.textContent = message;
   confirmOkBtn.textContent = confirmLabel;
+  confirmCancelBtn.textContent = cancelLabel;
   confirmOkBtn.classList.toggle("btn-danger", danger);
   confirmOkBtn.classList.toggle("btn-primary", !danger);
   confirmDialogEl.returnValue = "";
@@ -535,24 +551,85 @@ function finalizeActiveWorkout() {
   return finished;
 }
 
-async function finishWorkout() {
-  const ok = await confirmDialog("Workout jetzt beenden und speichern?", { confirmLabel: "Beenden" });
-  if (!ok || !state.activeWorkout) return;
+const finishDialog = document.getElementById("finish-dialog");
+const finishSaveBtn = document.getElementById("finish-save-btn");
+let finishUndo = null;
+
+// A workout counts as filled in as soon as one set is checked off or has its values entered.
+function hasEnteredSets(workout) {
+  return workout.exercises.some((exercise) => {
+    const type = getExerciseType(exercise.name);
+    return getRealSets(exercise).some((set) => set.done || isSetComplete(set, type));
+  });
+}
+
+function openFinishSheet() {
+  const workout = state.activeWorkout;
+  if (!workout) return;
+  const hasSets = hasEnteredSets(workout) || Boolean(getRunningIntervalExercise());
+  document.getElementById("finish-title").textContent = hasSets ? "Workout beenden" : "Noch nichts eingetragen";
+  document.getElementById("finish-text").textContent = hasSets ? "" : "Es gibt noch keinen Satz. Gespeichert wird nichts.";
+  const statsEl = document.getElementById("finish-stats");
+  statsEl.innerHTML = "";
+  statsEl.hidden = !hasSets;
+  if (hasSets) {
+    const stats = computeWorkoutStats(workout);
+    const rows = [
+      ["Dauer", formatDurationLong(stats.durationMs)],
+      ["Sätze", String(stats.setCount)],
+    ];
+    if (stats.volume > 0) rows.push(["Volumen", `${formatNumber(Math.round(stats.volume), 0)} ${UNITS.weight}`]);
+    for (const [label, value] of rows) {
+      const item = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const detail = document.createElement("dd");
+      detail.textContent = value;
+      item.append(term, detail);
+      statsEl.appendChild(item);
+    }
+  }
+  document.getElementById("finish-actions-save").hidden = !hasSets;
+  document.getElementById("finish-actions-empty").hidden = hasSets;
+  finishSaveBtn.disabled = false;
+  finishDialog.showModal();
+}
+
+function saveAndFinish() {
+  if (!state.activeWorkout) return;
+  finishSaveBtn.disabled = true;
   const runningInterval = getRunningIntervalExercise();
   if (runningInterval) finishInterval(runningInterval, true, { askDistance: false });
+  if (!hasEnteredSets(state.activeWorkout)) {
+    if (finishDialog.open) finishDialog.close();
+    openFinishSheet();
+    return;
+  }
+  const snapshot = JSON.stringify(state.activeWorkout);
   const finished = finalizeActiveWorkout();
+  finishUndo = { workoutId: finished.id, active: snapshot };
+  if (finishDialog.open) finishDialog.close();
   trainingView = "start";
   renderAll();
   syncWakeLock();
   openSummary(finished);
 }
 
-async function discardWorkout() {
-  const ok = await confirmDialog("Workout verwerfen? Alle Eingaben dieses Workouts gehen verloren.", {
-    confirmLabel: "Verwerfen",
-    danger: true,
-  });
-  if (!ok || !state.activeWorkout) return;
+function undoFinish() {
+  if (!finishUndo || state.activeWorkout) return;
+  state.workouts = state.workouts.filter((workout) => workout.id !== finishUndo.workoutId);
+  state.activeWorkout = JSON.parse(finishUndo.active);
+  finishUndo = null;
+  summaryDialog.close();
+  trainingView = "workout";
+  persistAndRender();
+  syncWakeLock();
+  window.scrollTo(0, 0);
+  showToast("Workout läuft weiter");
+}
+
+function discardActiveWorkout() {
+  if (!state.activeWorkout) return;
   state.activeWorkout = null;
   saveState();
   trainingView = "start";
@@ -560,6 +637,54 @@ async function discardWorkout() {
   syncWakeLock();
   showToast("Workout verworfen");
 }
+
+async function confirmDiscard() {
+  closeWorkoutMenu();
+  const ok = await confirmDialog("Workout verwerfen? Alle Eingaben gehen verloren.", {
+    confirmLabel: "Verwerfen",
+    cancelLabel: "Zurück",
+    danger: true,
+  });
+  if (ok) discardActiveWorkout();
+}
+
+const workoutMenuBtn = document.getElementById("workout-menu-btn");
+const workoutMenu = document.getElementById("workout-menu");
+
+function closeWorkoutMenu() {
+  if (workoutMenu.hidden) return;
+  workoutMenu.hidden = true;
+  workoutMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+workoutMenuBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (!workoutMenu.hidden) {
+    closeWorkoutMenu();
+    return;
+  }
+  workoutMenu.hidden = false;
+  workoutMenuBtn.setAttribute("aria-expanded", "true");
+  document.getElementById("menu-discard").focus();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest?.(".menu-wrap")) closeWorkoutMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !workoutMenu.hidden) {
+    closeWorkoutMenu();
+    workoutMenuBtn.focus();
+  }
+});
+document.getElementById("menu-discard").addEventListener("click", confirmDiscard);
+document.getElementById("finish-workout-btn").addEventListener("click", openFinishSheet);
+finishSaveBtn.addEventListener("click", saveAndFinish);
+document.getElementById("finish-continue-btn").addEventListener("click", () => finishDialog.close());
+document.getElementById("finish-empty-continue-btn").addEventListener("click", () => finishDialog.close());
+document.getElementById("finish-empty-discard-btn").addEventListener("click", () => {
+  finishDialog.close();
+  discardActiveWorkout();
+});
 
 function updateTimers() {
   const workout = state.activeWorkout;
@@ -570,6 +695,14 @@ function updateTimers() {
 }
 
 const workoutNotes = document.getElementById("workout-notes");
+const notesDetails = document.getElementById("notes-details");
+const notesSummary = document.getElementById("notes-summary");
+
+notesSummary.addEventListener("click", () => {
+  setTimeout(() => {
+    if (notesDetails.open) workoutNotes.focus();
+  }, 0);
+});
 let notesSaveTimer = null;
 
 function saveSoon() {
@@ -591,6 +724,7 @@ function renderTraining() {
   workoutScreen.hidden = trainingView !== "workout";
   routineScreen.hidden = trainingView !== "routine";
   document.body.classList.toggle("in-workout", trainingView !== "start" && currentTab === "training");
+  document.body.classList.toggle("has-finish-bar", trainingView === "workout" && currentTab === "training" && Boolean(workout));
   activeCard.hidden = !workout;
   renderRoutines();
   if (trainingView === "routine") renderRoutineEditor();
@@ -605,6 +739,12 @@ function renderTraining() {
     workoutStatus.textContent = paused ? "Pausiert – die Zeit läuft nicht weiter" : "";
     workoutScreen.classList.toggle("is-paused", paused);
     if (document.activeElement !== workoutNotes) workoutNotes.value = workout.notes || "";
+    const hasNote = Boolean(workout.notes && workout.notes.trim());
+    notesSummary.textContent = hasNote ? "Notiz" : "Notiz hinzufügen";
+    if (notesDetails.dataset.workoutId !== workout.id) {
+      notesDetails.dataset.workoutId = workout.id;
+      notesDetails.open = hasNote;
+    }
     updateTimers();
   }
   renderWorkoutExercises();
@@ -1505,6 +1645,7 @@ function openSummary(workout) {
   document.getElementById("summary-no-prs").textContent =
     records.length === 0 ? "Diesmal keine neuen Bestwerte – Hauptsache dabeigeblieben." : "";
 
+  document.getElementById("summary-undo").hidden = !finishUndo || finishUndo.workoutId !== workout.id;
   summaryTemplateBtn.disabled = workout.exercises.length === 0;
   summaryTemplateBtn.textContent = "Zu „Meine Workouts“ hinzufügen";
   summaryDialog.showModal();
@@ -1515,6 +1656,10 @@ summaryTemplateBtn.addEventListener("click", () => {
   if (workout) openTemplateDialog(workout);
 });
 document.getElementById("summary-done-btn").addEventListener("click", () => summaryDialog.close());
+document.getElementById("summary-undo").addEventListener("click", undoFinish);
+summaryDialog.addEventListener("close", () => {
+  finishUndo = null;
+});
 
 // ---------- Templates ----------
 
@@ -1618,6 +1763,9 @@ function renderRoutines() {
   routineList.innerHTML = "";
   routinesEmpty.hidden = state.routines.length > 0;
   const hasActive = Boolean(state.activeWorkout);
+  // The most recently trained entry (or the first one) gets the single primary start button.
+  const lastTrained = (routine) => getLastWorkoutForRoutine(routine.id)?.startedAt ?? -1;
+  const primaryRoutine = hasActive ? null : [...state.routines].sort((a, b) => lastTrained(b) - lastTrained(a))[0];
   for (const routine of state.routines) {
     const item = document.createElement("li");
     item.className = "routine-card";
@@ -1649,7 +1797,7 @@ function renderRoutines() {
 
     const startBtn = document.createElement("button");
     startBtn.type = "button";
-    startBtn.className = `btn ${hasActive ? "btn-secondary" : "btn-primary"} btn-block routine-start`;
+    startBtn.className = `btn ${routine === primaryRoutine ? "btn-primary" : "btn-outline"} btn-block routine-start`;
     startBtn.textContent = "Start";
     startBtn.setAttribute("aria-label", `${routine.name} starten`);
     startBtn.addEventListener("click", () => startWorkout(routine));
@@ -3226,6 +3374,8 @@ function renderIntervalScreen() {
   document.getElementById("interval-paused").hidden = !paused;
   intervalScreen.classList.toggle("is-paused", paused);
   intervalPauseBtn.textContent = paused ? "Fortsetzen" : "Pause";
+  const exercises = state.activeWorkout.exercises;
+  document.getElementById("interval-end-save").hidden = exercises[exercises.length - 1] !== exercise;
   const cues = getCues();
   intervalUnlockBtn.hidden = !(cues.sound || cues.countdown) || audioReady() || !(window.AudioContext || window.webkitAudioContext);
 }
@@ -3345,6 +3495,13 @@ document.getElementById("interval-end").addEventListener("click", () => {
   const exercise = getRunningIntervalExercise();
   if (exercise) finishInterval(exercise, true);
 });
+document.getElementById("interval-end-save").addEventListener("click", () => {
+  const exercise = getRunningIntervalExercise();
+  if (!exercise) return;
+  finishInterval(exercise, true, { askDistance: false });
+  if (hasEnteredSets(state.activeWorkout)) saveAndFinish();
+  else openFinishSheet();
+});
 intervalUnlockBtn.addEventListener("click", () => {
   unlockCues();
   renderIntervalScreen();
@@ -3404,8 +3561,7 @@ function updateWakeLockHint() {
   const workout = state.activeWorkout;
   let text = "";
   if (workout && !workout.pausedAt) {
-    if (wakeLockSentinel) text = "Bildschirm bleibt an.";
-    else if (!wakeLockSupported || wakeLockFailed) text = "Bildschirm kann ausgehen – Sperre im Handy verlängern.";
+    if (!wakeLockSentinel && (!wakeLockSupported || wakeLockFailed)) text = "Bildschirm kann ausgehen – Sperre im Handy verlängern.";
   }
   wakeLockHint.textContent = text;
 }
@@ -3461,8 +3617,6 @@ document.getElementById("minimize-workout-btn").addEventListener("click", () => 
   renderTraining();
 });
 pauseBtn.addEventListener("click", togglePause);
-document.getElementById("finish-workout-btn").addEventListener("click", finishWorkout);
-document.getElementById("discard-workout-btn").addEventListener("click", discardWorkout);
 
 document.addEventListener("visibilitychange", () => {
   tick();

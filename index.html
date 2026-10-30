@@ -74,15 +74,26 @@
 
       <div id="workout-screen" hidden>
         <div class="workout-header">
-          <button type="button" id="minimize-workout-btn" class="icon-btn" aria-label="Zur Startseite">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+          <button type="button" id="minimize-workout-btn" class="header-text-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            <span>Minimieren</span>
           </button>
           <div class="workout-header-main">
             <p id="workout-title" class="workout-title"></p>
             <p id="workout-timer" class="workout-timer">0:00</p>
             <p id="workout-status" class="workout-status"></p>
           </div>
-          <button type="button" id="pause-btn" class="icon-btn icon-btn-accent" aria-label="Workout pausieren"></button>
+          <div class="header-actions">
+            <button type="button" id="pause-btn" class="icon-btn icon-btn-accent" aria-label="Workout pausieren"></button>
+            <div class="menu-wrap">
+              <button type="button" id="workout-menu-btn" class="icon-btn" aria-label="Weitere Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="workout-menu">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>
+              </button>
+              <div id="workout-menu" class="menu" role="menu" hidden>
+                <button type="button" id="menu-discard" class="menu-item is-danger" role="menuitem">Workout verwerfen</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="workout-exercises" class="exercise-list"></div>
@@ -91,16 +102,15 @@
           <p>Füge die erste Übung hinzu.</p>
         </div>
         <button type="button" id="add-exercise-btn" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
-        <div class="field-group notes-field">
-          <label for="workout-notes">Notiz</label>
-          <textarea id="workout-notes" rows="2" maxlength="1000" placeholder="z. B. Schulter fühlte sich gut an"></textarea>
-        </div>
-
-        <div class="workout-actions">
-          <button type="button" id="finish-workout-btn" class="btn btn-primary btn-block">Workout beenden</button>
-          <button type="button" id="discard-workout-btn" class="btn btn-ghost-danger btn-block">Verwerfen</button>
-        </div>
+        <details id="notes-details" class="notes-details">
+          <summary id="notes-summary">Notiz hinzufügen</summary>
+          <textarea id="workout-notes" rows="3" maxlength="1000" aria-label="Notiz zum Workout" placeholder="z. B. Schulter fühlte sich gut an"></textarea>
+        </details>
         <p id="wakelock-hint" class="hint"></p>
+
+        <div class="finish-bar">
+          <button type="button" id="finish-workout-btn" class="btn btn-primary btn-block">Workout beenden</button>
+        </div>
       </div>
     </section>
 
@@ -264,7 +274,7 @@
     <form method="dialog" class="sheet-body">
       <p id="confirm-message" class="confirm-message"></p>
       <div class="dialog-actions">
-        <button type="submit" value="cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" value="cancel" id="confirm-cancel" class="btn btn-secondary">Abbrechen</button>
         <button type="submit" value="ok" id="confirm-ok" class="btn btn-primary">OK</button>
       </div>
     </form>
@@ -346,8 +356,31 @@
     </form>
   </dialog>
 
+  <dialog id="finish-dialog" class="sheet sheet-bottom" aria-labelledby="finish-title">
+    <div class="sheet-body">
+      <div>
+        <h2 id="finish-title" class="sheet-title">Workout beenden</h2>
+        <p id="finish-text" class="muted-small"></p>
+      </div>
+      <dl id="finish-stats" class="finish-stats"></dl>
+      <div id="finish-actions-save" class="finish-actions">
+        <button type="button" id="finish-save-btn" class="btn btn-primary btn-large btn-block">Speichern und beenden</button>
+        <button type="button" id="finish-continue-btn" class="btn btn-secondary btn-block">Weiter trainieren</button>
+      </div>
+      <div id="finish-actions-empty" class="finish-actions" hidden>
+        <button type="button" id="finish-empty-continue-btn" class="btn btn-primary btn-large btn-block">Weiter trainieren</button>
+        <button type="button" id="finish-empty-discard-btn" class="btn btn-ghost-danger btn-block">Verwerfen</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="summary-dialog" class="sheet" aria-labelledby="summary-title">
     <div class="sheet-body">
+      <div id="summary-saved" class="saved-banner" role="status">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+        <span>Gespeichert</span>
+        <button type="button" id="summary-undo" class="link-btn">Rückgängig</button>
+      </div>
       <div>
         <p class="card-kicker">Workout beendet</p>
         <h2 id="summary-title" class="sheet-title"></h2>
@@ -443,12 +476,16 @@
     </div>
     <div class="interval-bottom">
       <button type="button" id="interval-unlock" class="btn btn-secondary btn-block" hidden>Töne aktivieren</button>
-      <p class="interval-hint">Lass den Bildschirm an: Bei gesperrtem Bildschirm kommen Töne nicht zuverlässig.</p>
+      <p class="interval-hint">Bildschirm anlassen – gesperrt kommen Töne nicht zuverlässig.</p>
       <div class="interval-controls">
         <button type="button" id="interval-pause" class="btn btn-primary">Pause</button>
         <button type="button" id="interval-skip" class="btn btn-secondary">Phase überspringen</button>
       </div>
-      <button type="button" id="interval-end" class="btn btn-ghost-danger btn-block">Beenden</button>
+      <div class="interval-end-group">
+        <button type="button" id="interval-end" class="btn btn-secondary btn-block">Intervall beenden</button>
+        <p class="interval-end-hint">Das Workout läuft weiter.</p>
+        <button type="button" id="interval-end-save" class="btn btn-secondary btn-block" hidden>Intervall beenden und Workout speichern</button>
+      </div>
     </div>
   </div>
 
