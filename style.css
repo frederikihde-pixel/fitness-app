@@ -609,12 +609,6 @@ dialog.sheet[open] {
   color: var(--text-muted);
 }
 
-.last-time {
-  margin: -0.25rem 0 0;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
 .set-list {
   list-style: none;
   margin: 0;
@@ -622,69 +616,6 @@ dialog.sheet[open] {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-}
-
-.set-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.set-index {
-  width: 1.6rem;
-  flex-shrink: 0;
-  text-align: center;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.set-main {
-  flex: 1;
-  min-width: 0;
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.6rem 0.9rem;
-  font-family: inherit;
-  font-size: 1rem;
-  text-align: left;
-  color: var(--text);
-  background: var(--surface-alt);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
-}
-
-.set-value {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.set-tag {
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  border: 1px dashed var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
-}
-
-.is-planned .set-main {
-  border-style: dashed;
-  background: transparent;
-}
-
-.is-planned .set-value {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.is-done .set-main {
-  border-color: rgba(124, 140, 255, 0.45);
 }
 
 .check-btn {
@@ -1684,4 +1615,136 @@ button:disabled {
 .toast.visible {
   visibility: visible;
   transition-delay: 0s;
+}
+
+/* ---------- Inline set rows ---------- */
+
+.exercise-title {
+  min-width: 0;
+}
+
+.exercise-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.1rem;
+  margin: -0.35rem -0.45rem 0 0;
+}
+
+.icon-btn.is-on {
+  color: var(--accent);
+}
+
+.set-head,
+.set-row {
+  display: grid;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.set-head {
+  margin-bottom: -0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.set-index {
+  min-height: 48px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.set-index:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.mini-stepper,
+.mini-field {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 48px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s ease;
+}
+
+.mini-stepper:focus-within,
+.mini-field:focus-within {
+  border-color: var(--accent);
+}
+
+.mini-step {
+  flex-shrink: 0;
+  width: 30px;
+  height: 100%;
+  padding: 0;
+  font-family: inherit;
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.mini-step:active {
+  color: var(--accent);
+}
+
+.mini-step:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+input.set-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.15rem;
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+input.set-input:focus {
+  box-shadow: none;
+}
+
+.is-planned .mini-stepper,
+.is-planned .mini-field {
+  background: transparent;
+  border-style: dashed;
+}
+
+.is-planned input.set-input {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.is-done .mini-stepper,
+.is-done .mini-field {
+  border-color: rgba(124, 140, 255, 0.45);
+}
+
+.add-set-btn {
+  margin-top: 0.1rem;
 }

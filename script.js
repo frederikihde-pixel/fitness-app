@@ -736,10 +736,120 @@ function persistAndRender() {
   renderAll();
 }
 
+const TIMER_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7"/><path d="M12 10v3.5l2.2 1.6M10 3h4"/></svg>';
+const TIMER_OFF_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7"/><path d="M10 3h4M5 5l14 15"/></svg>';
+
+function restEnabledFor(name) {
+  const type = getExerciseType(name);
+  return (type === "strength" || type === "bodyweight") && state.exercises[name]?.rest !== false;
+}
+
+// Values that can be changed directly in a set row.
+const INLINE_FIELDS = {
+  strength: [
+    { key: "weight", head: UNITS.weight, label: "Gewicht in kg", kind: "decimal", step: 2.5, stepLabel: "2,5 kg", min: 0, required: true },
+    { key: "reps", head: "Wdh.", label: "Wiederholungen", kind: "int", step: 1, stepLabel: "1", min: 1, required: true },
+  ],
+  bodyweight: [{ key: "reps", head: "Wdh.", label: "Wiederholungen", kind: "int", step: 1, stepLabel: "1", min: 1, required: true }],
+  endurance: [
+    { key: "distance", head: UNITS.distance, label: "Distanz in km", kind: "decimal", min: 0 },
+    { key: "durationSec", head: "Zeit", label: "Zeit (Minuten oder mm:ss)", kind: "minutes", min: 0 },
+  ],
+  timed: [{ key: "durationSec", head: "Dauer", label: "Dauer (Sekunden oder m:ss)", kind: "seconds", step: 5, stepLabel: "5 Sekunden", min: 1, required: true }],
+};
+
+function formatFieldValue(set, field) {
+  const value = set[field.key];
+  if (value === null || value === undefined) return "";
+  if (field.kind === "minutes" || field.kind === "seconds") return formatClock(value * 1000);
+  if (field.kind === "int") return String(value);
+  return formatInputNumber(value);
+}
+
+// Returns the parsed value, null for an allowed empty field, or undefined when the input is invalid.
+function parseFieldValue(field, text) {
+  let value;
+  if (field.kind === "minutes") value = parseDurationInput(text, "min");
+  else if (field.kind === "seconds") value = parseDurationInput(text, "sec");
+  else value = parseDecimal(text);
+  if (value === null) return field.required ? undefined : null;
+  if (Number.isNaN(value) || value < field.min) return undefined;
+  if (field.kind === "int" && !Number.isInteger(value)) return undefined;
+  return field.kind === "decimal" ? roundTo(value, 2) : value;
+}
+
+function findSet(ctx, exerciseId, setId) {
+  const exercise = getWorkoutByCtx(ctx)?.exercises.find((item) => item.id === exerciseId);
+  return { exercise, set: exercise?.sets.find((item) => item.id === setId) };
+}
+
+// Inline edits only save and update the row, so the input keeps focus and nothing flickers.
+function commitSetField(ctx, exerciseId, setId, field, value, row) {
+  const { set } = findSet(ctx, exerciseId, setId);
+  if (!set) return;
+  set[field.key] = value;
+  if (set.planned) {
+    set.planned = false;
+    row.classList.remove("is-planned");
+  }
+  saveState();
+}
+
+function buildFieldControl(ctx, exercise, set, field, index, row) {
+  const wrap = document.createElement("div");
+  wrap.className = field.step ? "mini-stepper" : "mini-field";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "set-input";
+  input.inputMode = field.kind === "int" || field.kind === "seconds" ? "numeric" : "decimal";
+  input.autocomplete = "off";
+  input.enterKeyHint = "done";
+  input.value = formatFieldValue(set, field);
+  if (field.kind === "minutes") input.placeholder = "mm:ss";
+  input.setAttribute("aria-label", `${field.label}, Satz ${index + 1}`);
+  input.addEventListener("focus", () => input.select());
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") input.blur();
+  });
+  input.addEventListener("change", () => {
+    const { set: current } = findSet(ctx, exercise.id, set.id);
+    if (!current) return;
+    const value = parseFieldValue(field, input.value);
+    if (value !== undefined) commitSetField(ctx, exercise.id, set.id, field, value, row);
+    input.value = formatFieldValue(current, field);
+  });
+
+  if (!field.step) {
+    wrap.appendChild(input);
+    return wrap;
+  }
+  const makeStep = (direction) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mini-step";
+    button.textContent = direction < 0 ? "−" : "+";
+    button.setAttribute("aria-label", `${field.label} Satz ${index + 1} um ${field.stepLabel} ${direction < 0 ? "verringern" : "erhöhen"}`);
+    button.addEventListener("click", () => {
+      const { set: current } = findSet(ctx, exercise.id, set.id);
+      if (!current) return;
+      const base = current[field.key] ?? field.min;
+      const next = Math.max(field.min, roundTo(base + direction * field.step, 2));
+      commitSetField(ctx, exercise.id, set.id, field, next, row);
+      input.value = formatFieldValue(current, field);
+    });
+    return button;
+  };
+  wrap.append(makeStep(-1), input, makeStep(1));
+  return wrap;
+}
+
 function renderExerciseList(container, workout, ctx) {
   container.innerHTML = "";
   workout.exercises.forEach((exercise) => {
     const type = getExerciseType(exercise.name);
+    const fields = INLINE_FIELDS[type];
     const card = document.createElement("article");
     card.className = "exercise-card";
     card.dataset.exerciseId = exercise.id;
@@ -747,61 +857,66 @@ function renderExerciseList(container, workout, ctx) {
     const head = document.createElement("header");
     head.className = "exercise-head";
     const titleWrap = document.createElement("div");
+    titleWrap.className = "exercise-title";
     const title = document.createElement("h3");
     title.className = "exercise-name";
     title.textContent = exercise.name;
-    const typeLabel = document.createElement("p");
-    typeLabel.className = "exercise-type";
-    typeLabel.textContent = EXERCISE_TYPES[type].label;
-    titleWrap.append(title, typeLabel);
-    const removeBtn = document.createElement("button");
-    removeBtn.type = "button";
-    removeBtn.className = "icon-btn icon-btn-plain";
-    removeBtn.innerHTML = TRASH_ICON;
-    removeBtn.setAttribute("aria-label", `Übung ${exercise.name} entfernen`);
-    removeBtn.addEventListener("click", () => removeExercise(ctx, exercise.id));
-    head.append(titleWrap, removeBtn);
+    const previous = getPreviousSets(exercise.name, workout.startedAt ?? Infinity, workout.id);
+    const sub = document.createElement("p");
+    sub.className = "exercise-type";
+    sub.textContent = previous ? `Letztes Mal: ${summarizeSets(previous.sets, type)}` : EXERCISE_TYPES[type].label;
+    titleWrap.append(title, sub);
+
+    const actions = document.createElement("div");
+    actions.className = "exercise-actions";
+    if ((type === "strength" || type === "bodyweight") && ctx.kind !== "finished") {
+      const on = restEnabledFor(exercise.name);
+      const restBtn = makeIconButton(on ? TIMER_ICON : TIMER_OFF_ICON, `Pausen-Timer für ${exercise.name}`, () => {
+        state.exercises[exercise.name] = { ...(state.exercises[exercise.name] || { type }), rest: !on };
+        persistAndRender();
+        showToast(`Pausen-Timer für ${exercise.name} ${on ? "aus" : "an"}`);
+      });
+      restBtn.setAttribute("aria-pressed", String(on));
+      restBtn.classList.toggle("is-on", on);
+      actions.appendChild(restBtn);
+    }
+    actions.appendChild(makeIconButton(TRASH_ICON, `Übung ${exercise.name} entfernen`, () => removeExercise(ctx, exercise.id)));
+    head.append(titleWrap, actions);
     card.appendChild(head);
 
-    const previous = getPreviousSets(exercise.name, workout.startedAt ?? Infinity, workout.id);
-    if (previous) {
-      const last = document.createElement("p");
-      last.className = "last-time";
-      last.textContent = `Letztes Mal: ${summarizeSets(previous.sets, type)}`;
-      card.appendChild(last);
-    }
-
     if (exercise.sets.length > 0) {
+      const grid = `28px repeat(${fields.length}, minmax(0, 1fr))${ctx.kind === "active" ? " 48px" : ""}`;
+      const headRow = document.createElement("div");
+      headRow.className = "set-head";
+      headRow.style.gridTemplateColumns = grid;
+      headRow.setAttribute("aria-hidden", "true");
+      headRow.append(document.createElement("span"));
+      for (const field of fields) {
+        const label = document.createElement("span");
+        label.textContent = field.head;
+        headRow.appendChild(label);
+      }
+      if (ctx.kind === "active") headRow.append(document.createElement("span"));
+      card.appendChild(headRow);
+
       const list = document.createElement("ol");
       list.className = "set-list";
       exercise.sets.forEach((set, index) => {
         const row = document.createElement("li");
         row.className = "set-row";
+        row.style.gridTemplateColumns = grid;
         row.classList.toggle("is-planned", Boolean(set.planned));
-        row.classList.toggle("is-done", Boolean(set.done) && !set.planned);
+        row.classList.toggle("is-done", Boolean(set.done) && !set.planned && ctx.kind === "active");
 
-        const indexEl = document.createElement("span");
-        indexEl.className = "set-index";
-        indexEl.textContent = String(index + 1);
-        indexEl.setAttribute("aria-hidden", "true");
+        const indexBtn = document.createElement("button");
+        indexBtn.type = "button";
+        indexBtn.className = "set-index";
+        indexBtn.textContent = String(index + 1);
+        indexBtn.setAttribute("aria-label", `Satz ${index + 1}: Details und Löschen`);
+        indexBtn.addEventListener("click", () => openSetDialog(ctx, exercise.id, set.id));
+        row.appendChild(indexBtn);
 
-        const valueText = formatSet(set, type);
-        const main = document.createElement("button");
-        main.type = "button";
-        main.className = "set-main";
-        main.setAttribute("aria-label", `Satz ${index + 1} bearbeiten: ${valueText}${set.planned ? " (vorgeschlagen)" : ""}`);
-        const valueEl = document.createElement("span");
-        valueEl.className = "set-value";
-        valueEl.textContent = valueText;
-        main.appendChild(valueEl);
-        if (set.planned) {
-          const tag = document.createElement("span");
-          tag.className = "set-tag";
-          tag.textContent = "Vorschlag";
-          main.appendChild(tag);
-        }
-        main.addEventListener("click", () => openSetDialog(ctx, exercise.id, set.id));
-        row.append(indexEl, main);
+        for (const field of fields) row.appendChild(buildFieldControl(ctx, exercise, set, field, index, row));
 
         if (ctx.kind === "active") {
           const check = document.createElement("button");
@@ -822,27 +937,57 @@ function renderExerciseList(container, workout, ctx) {
     const addSetBtn = document.createElement("button");
     addSetBtn.type = "button";
     addSetBtn.className = "btn btn-secondary btn-block add-set-btn";
-    addSetBtn.textContent = "+ Satz hinzufügen";
+    addSetBtn.textContent = "+ Satz";
     addSetBtn.setAttribute("aria-label", `Satz zu ${exercise.name} hinzufügen`);
-    addSetBtn.addEventListener("click", () => openSetDialog(ctx, exercise.id, null));
+    addSetBtn.addEventListener("click", () => addSetInstant(ctx, exercise.id));
     card.appendChild(addSetBtn);
 
     container.appendChild(card);
   });
 }
 
-async function removeExercise(ctx, exerciseId) {
+function newSetFor(ctx, values) {
+  const set = { id: createId("s"), ...values };
+  if (ctx.kind === "active") set.done = false;
+  if (ctx.kind === "finished") set.done = true;
+  return set;
+}
+
+function addSetInstant(ctx, exerciseId) {
   const workout = getWorkoutByCtx(ctx);
   const exercise = workout?.exercises.find((item) => item.id === exerciseId);
   if (!exercise) return;
-  const count = getRealSets(exercise).length;
-  const ok = await confirmDialog(
-    `Übung „${exercise.name}“${count ? ` mit ${count} ${count === 1 ? "Satz" : "Sätzen"}` : ""} aus dem Workout entfernen?`,
-    { confirmLabel: "Entfernen", danger: true }
-  );
-  if (!ok) return;
-  workout.exercises = workout.exercises.filter((item) => item.id !== exerciseId);
+  const last = exercise.sets[exercise.sets.length - 1];
+  exercise.sets.push(newSetFor(ctx, last ? pickSetValues(last) : getPrefillValues(workout, exercise)));
   persistAndRender();
+}
+
+function deleteSet(ctx, exerciseId, setId) {
+  const { exercise } = findSet(ctx, exerciseId, setId);
+  const index = exercise ? exercise.sets.findIndex((item) => item.id === setId) : -1;
+  if (index < 0) return;
+  const [removed] = exercise.sets.splice(index, 1);
+  persistAndRender();
+  showUndoToast(`Satz ${index + 1} gelöscht`, () => {
+    const target = getWorkoutByCtx(ctx)?.exercises.find((item) => item.id === exerciseId);
+    if (!target) return;
+    target.sets.splice(Math.min(index, target.sets.length), 0, removed);
+    persistAndRender();
+  });
+}
+
+function removeExercise(ctx, exerciseId) {
+  const workout = getWorkoutByCtx(ctx);
+  const index = workout ? workout.exercises.findIndex((item) => item.id === exerciseId) : -1;
+  if (index < 0) return;
+  const [removed] = workout.exercises.splice(index, 1);
+  persistAndRender();
+  showUndoToast(`„${removed.name}“ entfernt`, () => {
+    const target = getWorkoutByCtx(ctx);
+    if (!target) return;
+    target.exercises.splice(Math.min(index, target.exercises.length), 0, removed);
+    persistAndRender();
+  });
 }
 
 function isSetComplete(set, type) {
@@ -862,7 +1007,8 @@ function toggleSetDone(exerciseId, setId) {
   const nowDone = set.planned ? true : !set.done;
   set.planned = false;
   set.done = nowDone;
-  if (nowDone) startRest();
+  const exercise = workout.exercises.find((item) => item.id === exerciseId);
+  if (nowDone && restEnabledFor(exercise.name)) startRest();
   persistAndRender();
 }
 
@@ -906,7 +1052,11 @@ function addExerciseToWorkout(name, type) {
   const workout = getWorkoutByCtx(exerciseDialogCtx);
   if (!workout) return;
   if (!state.exercises[name]) state.exercises[name] = { type: type || "strength" };
-  workout.exercises.push({ id: createId("e"), name, sets: [] });
+  const exercise = { id: createId("e"), name, sets: [] };
+  const firstSet = newSetFor(exerciseDialogCtx, getPrefillValues(workout, exercise));
+  if (exerciseDialogCtx.kind === "active") firstSet.planned = true;
+  exercise.sets.push(firstSet);
+  workout.exercises.push(exercise);
   exerciseDialog.close();
   persistAndRender();
   const card = document.querySelector(`[data-exercise-id="${workout.exercises[workout.exercises.length - 1].id}"]`);
@@ -1076,16 +1226,11 @@ setForm.addEventListener("submit", (event) => {
   persistAndRender();
 });
 
-setDeleteBtn.addEventListener("click", async () => {
+setDeleteBtn.addEventListener("click", () => {
   if (!setEditor?.setId) return;
   const editor = setEditor;
   setDialog.close();
-  const ok = await confirmDialog("Diesen Satz löschen?", { confirmLabel: "Löschen", danger: true });
-  if (!ok) return;
-  const exercise = getWorkoutByCtx(editor.ctx)?.exercises.find((item) => item.id === editor.exerciseId);
-  if (!exercise) return;
-  exercise.sets = exercise.sets.filter((item) => item.id !== editor.setId);
-  persistAndRender();
+  deleteSet(editor.ctx, editor.exerciseId, editor.setId);
 });
 
 document.getElementById("set-cancel").addEventListener("click", () => setDialog.close());
@@ -1402,6 +1547,7 @@ const routinesEmpty = document.getElementById("routines-empty");
 const routineNameInput = document.getElementById("routine-name");
 const routineExercisesEl = document.getElementById("routine-exercises");
 const routineEmpty = document.getElementById("routine-empty");
+const repeatLastBtn = document.getElementById("repeat-last-btn");
 
 function getRoutine(id) {
   return state.routines.find((routine) => routine.id === id) || null;
@@ -1422,6 +1568,9 @@ function makeIconButton(icon, label, onClick) {
 }
 
 function renderRoutines() {
+  const last = getLastWorkout();
+  repeatLastBtn.hidden = !last || Boolean(state.activeWorkout);
+  if (last) repeatLastBtn.setAttribute("aria-label", `Letztes Training wiederholen: ${last.name}`);
   routineList.innerHTML = "";
   routinesEmpty.hidden = state.routines.length > 0;
   const hasActive = Boolean(state.activeWorkout);
@@ -1464,6 +1613,21 @@ function renderRoutines() {
     item.append(head, exercises, meta, startBtn);
     routineList.appendChild(item);
   }
+}
+
+function getLastWorkout() {
+  return state.workouts.reduce((latest, workout) => (!latest || workout.startedAt > latest.startedAt ? workout : latest), null);
+}
+
+function repeatLastWorkout() {
+  const last = getLastWorkout();
+  if (!last) return;
+  const keepsDateName = last.name === formatWorkoutDefaultName(last.startedAt);
+  startWorkout({
+    id: last.routineId || null,
+    name: keepsDateName ? null : last.name,
+    exercises: last.exercises.map((exercise) => ({ name: exercise.name, sets: getRealSets(exercise) })).filter((exercise) => exercise.sets.length > 0),
+  });
 }
 
 function createRoutine() {
@@ -1541,6 +1705,7 @@ routineNameInput.addEventListener("change", () => {
   routineNameInput.value = getRoutine(editingRoutineId)?.name || "";
 });
 document.getElementById("new-workout-btn").addEventListener("click", createRoutine);
+document.getElementById("repeat-last-btn").addEventListener("click", repeatLastWorkout);
 document.getElementById("routine-back-btn").addEventListener("click", closeRoutineEditor);
 document.getElementById("routine-add-exercise-btn").addEventListener("click", () =>
   openExerciseDialog({ kind: "routine", routineId: editingRoutineId })
@@ -1635,15 +1800,16 @@ document.getElementById("detail-template").addEventListener("click", () => {
   const workout = state.workouts.find((item) => item.id === detailWorkoutId);
   if (workout) openTemplateDialog(workout);
 });
-document.getElementById("detail-delete").addEventListener("click", async () => {
-  const workout = state.workouts.find((item) => item.id === detailWorkoutId);
-  if (!workout) return;
-  const ok = await confirmDialog(`Workout „${workout.name}“ endgültig löschen?`, { confirmLabel: "Löschen", danger: true });
-  if (!ok) return;
-  state.workouts = state.workouts.filter((item) => item.id !== workout.id);
+document.getElementById("detail-delete").addEventListener("click", () => {
+  const index = state.workouts.findIndex((item) => item.id === detailWorkoutId);
+  if (index < 0) return;
+  const [removed] = state.workouts.splice(index, 1);
   detailDialog.close();
   persistAndRender();
-  showToast("Workout gelöscht");
+  showUndoToast(`„${removed.name}“ gelöscht`, () => {
+    state.workouts.splice(Math.min(index, state.workouts.length), 0, removed);
+    persistAndRender();
+  });
 });
 
 document.getElementById("history-start-btn").addEventListener("click", () => switchTab("training"));
