@@ -370,11 +370,35 @@ function formatDurationLong(ms) {
 const toastEl = document.getElementById("toast");
 let toastTimer = null;
 
-function showToast(message) {
-  toastEl.textContent = message;
-  toastEl.classList.add("visible");
+function hideToast() {
+  toastEl.classList.remove("visible", "has-action");
+}
+
+function showToast(message, action = null) {
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 2600);
+  toastEl.textContent = "";
+  const text = document.createElement("span");
+  text.textContent = message;
+  toastEl.appendChild(text);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      hideToast();
+      action.onClick();
+    });
+    toastEl.appendChild(button);
+  }
+  toastEl.classList.toggle("has-action", Boolean(action));
+  toastEl.classList.add("visible");
+  toastTimer = setTimeout(hideToast, action ? 5000 : 2600);
+}
+
+// Deletions are applied right away; "Rückgängig" puts the item back for 5 seconds.
+function showUndoToast(message, restore) {
+  showToast(message, { label: "Rückgängig", onClick: restore });
 }
 
 const confirmDialogEl = document.getElementById("confirm-dialog");
@@ -406,8 +430,6 @@ const activeCard = document.getElementById("active-workout-card");
 const activeCardKicker = activeCard.querySelector(".card-kicker");
 const activeCardName = document.getElementById("active-card-name");
 const activeCardTimer = document.getElementById("active-card-timer");
-const startCard = document.getElementById("start-card");
-const workoutNameInput = document.getElementById("workout-name-input");
 const workoutTitle = document.getElementById("workout-title");
 const workoutTimer = document.getElementById("workout-timer");
 const workoutStatus = document.getElementById("workout-status");
@@ -415,7 +437,8 @@ const pauseBtn = document.getElementById("pause-btn");
 const wakeLockHint = document.getElementById("wakelock-hint");
 
 let currentTab = "training";
-let workoutViewOpen = false;
+let trainingView = "start";
+let editingRoutineId = null;
 
 // Elapsed time is derived from timestamps, so it stays correct across reloads, locked screens and background tabs.
 function getElapsedMs(workout, now = Date.now()) {
@@ -428,11 +451,14 @@ function copySetValues(set) {
 }
 
 function startWorkout(template = null) {
+  if (state.activeWorkout) {
+    showToast("Beende zuerst das laufende Workout.");
+    return;
+  }
   const now = Date.now();
-  const name = workoutNameInput.value.trim();
   const workout = {
     id: createId("w"),
-    name: name || template?.name || formatWorkoutDefaultName(now),
+    name: template?.name || formatWorkoutDefaultName(now),
     routineId: template?.id || null,
     notes: "",
     startedAt: now,
@@ -450,9 +476,8 @@ function startWorkout(template = null) {
     });
   }
   state.activeWorkout = workout;
-  workoutNameInput.value = "";
   saveState();
-  workoutViewOpen = true;
+  trainingView = "workout";
   renderAll();
   syncWakeLock();
   window.scrollTo(0, 0);
@@ -507,7 +532,7 @@ async function finishWorkout() {
   const ok = await confirmDialog("Workout jetzt beenden und speichern?", { confirmLabel: "Beenden" });
   if (!ok || !state.activeWorkout) return;
   const finished = finalizeActiveWorkout();
-  workoutViewOpen = false;
+  trainingView = "start";
   renderAll();
   syncWakeLock();
   openSummary(finished);
@@ -521,7 +546,7 @@ async function discardWorkout() {
   if (!ok || !state.activeWorkout) return;
   state.activeWorkout = null;
   saveState();
-  workoutViewOpen = false;
+  trainingView = "start";
   renderAll();
   syncWakeLock();
   showToast("Workout verworfen");
@@ -537,12 +562,15 @@ function updateTimers() {
 
 function renderTraining() {
   const workout = state.activeWorkout;
-  const showWorkout = Boolean(workout) && workoutViewOpen;
-  startScreen.hidden = showWorkout;
-  workoutScreen.hidden = !showWorkout;
-  document.body.classList.toggle("in-workout", showWorkout && currentTab === "training");
+  if (trainingView === "workout" && !workout) trainingView = "start";
+  if (trainingView === "routine" && !state.routines.some((routine) => routine.id === editingRoutineId)) trainingView = "start";
+  startScreen.hidden = trainingView !== "start";
+  workoutScreen.hidden = trainingView !== "workout";
+  routineScreen.hidden = trainingView !== "routine";
+  document.body.classList.toggle("in-workout", trainingView !== "start" && currentTab === "training");
   activeCard.hidden = !workout;
-  startCard.hidden = Boolean(workout);
+  renderRoutines();
+  if (trainingView === "routine") renderRoutineEditor();
 
   if (workout) {
     const paused = Boolean(workout.pausedAt);
@@ -647,6 +675,7 @@ function summarizeSets(sets, type) {
 // ctx is { kind: "active" } for the running workout or { kind: "finished", workoutId } for a saved one.
 function getWorkoutByCtx(ctx) {
   if (ctx.kind === "active") return state.activeWorkout;
+  if (ctx.kind === "routine") return state.routines.find((routine) => routine.id === ctx.routineId) || null;
   return state.workouts.find((workout) => workout.id === ctx.workoutId) || null;
 }
 
@@ -694,7 +723,7 @@ function pickSetValues(set) {
 function getPrefillValues(workout, exercise, index = null) {
   const realSets = getRealSets(exercise);
   if (index === null && realSets.length > 0) return pickSetValues(realSets[realSets.length - 1]);
-  const previous = getPreviousSets(exercise.name, workout.startedAt, workout.id);
+  const previous = getPreviousSets(exercise.name, workout.startedAt ?? Infinity, workout.id);
   if (previous) {
     const source = index !== null && previous.sets[index] ? previous.sets[index] : previous.sets[previous.sets.length - 1];
     return pickSetValues(source);
@@ -734,7 +763,7 @@ function renderExerciseList(container, workout, ctx) {
     head.append(titleWrap, removeBtn);
     card.appendChild(head);
 
-    const previous = getPreviousSets(exercise.name, workout.startedAt, workout.id);
+    const previous = getPreviousSets(exercise.name, workout.startedAt ?? Infinity, workout.id);
     if (previous) {
       const last = document.createElement("p");
       last.className = "last-time";
@@ -954,7 +983,7 @@ function openSetDialog(ctx, exerciseId, setId) {
   setEditor = { ctx, exerciseId, setId, type };
 
   setDialogTitle.textContent = `${exercise.name} · Satz ${index + 1}`;
-  const previous = getPreviousSets(exercise.name, workout.startedAt, workout.id);
+  const previous = getPreviousSets(exercise.name, workout.startedAt ?? Infinity, workout.id);
   setDialogLast.textContent = previous ? `Letztes Mal: ${summarizeSets(previous.sets, type)}` : "";
 
   const visible = FIELDS_BY_TYPE[type];
@@ -1294,7 +1323,7 @@ function openSummary(workout) {
     records.length === 0 ? "Diesmal keine neuen Bestwerte – Hauptsache dabeigeblieben." : "";
 
   summaryTemplateBtn.disabled = workout.exercises.length === 0;
-  summaryTemplateBtn.textContent = "Als Vorlage speichern";
+  summaryTemplateBtn.textContent = "Zu „Meine Workouts“ hinzufügen";
   summaryDialog.showModal();
 }
 
@@ -1325,7 +1354,7 @@ templateForm.addEventListener("submit", (event) => {
   const workout = state.workouts.find((item) => item.id === templateSourceId);
   const name = templateNameInput.value.trim();
   if (!name) {
-    templateError.textContent = "Bitte gib der Vorlage einen Namen.";
+    templateError.textContent = "Bitte gib einen Namen ein.";
     return;
   }
   if (!workout || workout.exercises.length === 0) {
@@ -1351,60 +1380,175 @@ templateForm.addEventListener("submit", (event) => {
   templateDialog.close();
   if (workout.id === summaryWorkoutId && summaryDialog.open) {
     summaryTemplateBtn.disabled = true;
-    summaryTemplateBtn.textContent = "Als Vorlage gespeichert";
+    summaryTemplateBtn.textContent = "In „Meine Workouts“ gespeichert";
   }
   persistAndRender();
-  showToast(existingIndex >= 0 ? `Vorlage „${name}“ aktualisiert` : `Vorlage „${name}“ gespeichert`);
+  showToast(existingIndex >= 0 ? `„${name}“ in Meine Workouts aktualisiert` : `„${name}“ zu Meine Workouts hinzugefügt`);
 });
 
 document.getElementById("template-cancel").addEventListener("click", () => templateDialog.close());
 
-const templateList = document.getElementById("template-list");
-const templatesEmpty = document.getElementById("templates-empty");
-const templatesSection = document.getElementById("templates-section");
+// ---------- Meine Workouts (planned workouts) ----------
 
-function renderTemplates() {
-  templatesSection.hidden = Boolean(state.activeWorkout);
-  templateList.innerHTML = "";
-  templatesEmpty.hidden = state.routines.length > 0;
-  for (const template of state.routines) {
+const PENCIL_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
+const COPY_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const NEW_ROUTINE_NAME = "Neues Workout";
+
+const routineScreen = document.getElementById("routine-screen");
+const routineList = document.getElementById("routine-list");
+const routinesEmpty = document.getElementById("routines-empty");
+const routineNameInput = document.getElementById("routine-name");
+const routineExercisesEl = document.getElementById("routine-exercises");
+const routineEmpty = document.getElementById("routine-empty");
+
+function getRoutine(id) {
+  return state.routines.find((routine) => routine.id === id) || null;
+}
+
+function getLastWorkoutForRoutine(routineId) {
+  return state.workouts.filter((workout) => workout.routineId === routineId).sort((a, b) => b.startedAt - a.startedAt)[0] || null;
+}
+
+function makeIconButton(icon, label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "icon-btn icon-btn-plain";
+  button.innerHTML = icon;
+  button.setAttribute("aria-label", label);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderRoutines() {
+  routineList.innerHTML = "";
+  routinesEmpty.hidden = state.routines.length > 0;
+  const hasActive = Boolean(state.activeWorkout);
+  for (const routine of state.routines) {
     const item = document.createElement("li");
-    item.className = "template-item";
-    const text = document.createElement("div");
-    text.className = "template-text";
-    const name = document.createElement("strong");
-    name.textContent = template.name;
-    const exercises = document.createElement("span");
-    const names = template.exercises.map((exercise) => exercise.name);
-    exercises.textContent = names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
-    text.append(name, exercises);
+    item.className = "routine-card";
+
+    const head = document.createElement("div");
+    head.className = "routine-head";
+    const title = document.createElement("h3");
+    title.className = "routine-name";
+    title.textContent = routine.name;
+    const actions = document.createElement("div");
+    actions.className = "routine-actions";
+    actions.append(
+      makeIconButton(PENCIL_ICON, `${routine.name} bearbeiten`, () => openRoutineEditor(routine.id)),
+      makeIconButton(COPY_ICON, `${routine.name} duplizieren`, () => duplicateRoutine(routine.id)),
+      makeIconButton(TRASH_ICON, `${routine.name} löschen`, () => deleteRoutine(routine.id))
+    );
+    head.append(title, actions);
+
+    const names = routine.exercises.map((exercise) => exercise.name);
+    const exercises = document.createElement("p");
+    exercises.className = "routine-exercises";
+    exercises.textContent =
+      names.length === 0 ? "Noch keine Übungen" : names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
+
+    const last = getLastWorkoutForRoutine(routine.id);
+    const meta = document.createElement("p");
+    meta.className = "routine-meta";
+    meta.textContent = last ? `Zuletzt ${formatShortDate(last.startedAt)} · ${formatDurationLong(getElapsedMs(last))}` : "Noch nicht trainiert";
 
     const startBtn = document.createElement("button");
     startBtn.type = "button";
-    startBtn.className = "btn btn-primary template-start";
+    startBtn.className = `btn ${hasActive ? "btn-secondary" : "btn-primary"} btn-block routine-start`;
     startBtn.textContent = "Start";
-    startBtn.setAttribute("aria-label", `Workout aus Vorlage ${template.name} starten`);
-    startBtn.addEventListener("click", () => startWorkout(template));
+    startBtn.setAttribute("aria-label", `${routine.name} starten`);
+    startBtn.addEventListener("click", () => startWorkout(routine));
 
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "icon-btn icon-btn-plain";
-    deleteBtn.innerHTML = TRASH_ICON;
-    deleteBtn.setAttribute("aria-label", `Vorlage ${template.name} löschen`);
-    deleteBtn.addEventListener("click", async () => {
-      const ok = await confirmDialog(`Vorlage „${template.name}“ löschen? Deine Workouts bleiben erhalten.`, {
-        confirmLabel: "Löschen",
-        danger: true,
-      });
-      if (!ok) return;
-      state.routines = state.routines.filter((item) => item.id !== template.id);
-      persistAndRender();
-    });
-
-    item.append(text, startBtn, deleteBtn);
-    templateList.appendChild(item);
+    item.append(head, exercises, meta, startBtn);
+    routineList.appendChild(item);
   }
 }
+
+function createRoutine() {
+  const routine = { id: createId("r"), name: NEW_ROUTINE_NAME, notes: "", createdAt: Date.now(), exercises: [] };
+  state.routines.push(routine);
+  saveState();
+  openRoutineEditor(routine.id);
+  routineNameInput.focus();
+  routineNameInput.select();
+}
+
+function openRoutineEditor(routineId) {
+  editingRoutineId = routineId;
+  trainingView = "routine";
+  renderTraining();
+  window.scrollTo(0, 0);
+}
+
+function closeRoutineEditor() {
+  const routine = getRoutine(editingRoutineId);
+  // A draft that was opened but never filled in is not kept.
+  if (routine && routine.exercises.length === 0 && routine.name === NEW_ROUTINE_NAME) {
+    state.routines = state.routines.filter((item) => item.id !== routine.id);
+    saveState();
+  }
+  trainingView = "start";
+  editingRoutineId = null;
+  renderTraining();
+}
+
+function renderRoutineEditor() {
+  const routine = getRoutine(editingRoutineId);
+  if (!routine) return;
+  if (document.activeElement !== routineNameInput) routineNameInput.value = routine.name;
+  renderExerciseList(routineExercisesEl, routine, { kind: "routine", routineId: routine.id });
+  routineEmpty.hidden = routine.exercises.length > 0;
+}
+
+function cloneExercisesWithNewIds(exercises) {
+  return exercises.map((exercise) => ({
+    ...exercise,
+    id: createId("e"),
+    sets: exercise.sets.map((set) => ({ id: createId("s"), ...copySetValues(set) })),
+  }));
+}
+
+function duplicateRoutine(routineId) {
+  const index = state.routines.findIndex((routine) => routine.id === routineId);
+  if (index < 0) return;
+  const source = state.routines[index];
+  const copy = { ...source, id: createId("r"), name: `${source.name} (Kopie)`, createdAt: Date.now(), exercises: cloneExercisesWithNewIds(source.exercises) };
+  state.routines.splice(index + 1, 0, copy);
+  persistAndRender();
+  showToast(`„${copy.name}“ erstellt`);
+}
+
+function deleteRoutine(routineId) {
+  const index = state.routines.findIndex((routine) => routine.id === routineId);
+  if (index < 0) return;
+  const [removed] = state.routines.splice(index, 1);
+  persistAndRender();
+  showUndoToast(`„${removed.name}“ gelöscht`, () => {
+    state.routines.splice(Math.min(index, state.routines.length), 0, removed);
+    persistAndRender();
+  });
+}
+
+routineNameInput.addEventListener("input", () => {
+  const routine = getRoutine(editingRoutineId);
+  if (!routine) return;
+  routine.name = routineNameInput.value.trim() || NEW_ROUTINE_NAME;
+  saveState();
+});
+routineNameInput.addEventListener("change", () => {
+  routineNameInput.value = getRoutine(editingRoutineId)?.name || "";
+});
+document.getElementById("new-workout-btn").addEventListener("click", createRoutine);
+document.getElementById("routine-back-btn").addEventListener("click", closeRoutineEditor);
+document.getElementById("routine-add-exercise-btn").addEventListener("click", () =>
+  openExerciseDialog({ kind: "routine", routineId: editingRoutineId })
+);
+document.getElementById("routine-start-btn").addEventListener("click", () => {
+  const routine = getRoutine(editingRoutineId);
+  if (routine) startWorkout(routine);
+});
 
 // ---------- History list and detail ----------
 
@@ -2363,7 +2507,7 @@ async function importData(file) {
   if (!ok) return;
   storage.set(`${DATA_KEY}-vor-import-${Date.now()}`, JSON.stringify(state));
   state = imported;
-  workoutViewOpen = false;
+  trainingView = "start";
   saveState();
   renderAll();
   syncWakeLock();
@@ -2443,7 +2587,6 @@ function switchTab(tab) {
 
 function renderAll() {
   renderTraining();
-  renderTemplates();
   renderHistory();
   if (detailDialog.open) renderDetail();
   renderStatistik();
@@ -2459,15 +2602,14 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-document.getElementById("start-workout-btn").addEventListener("click", () => startWorkout());
 document.getElementById("open-workout-btn").addEventListener("click", () => {
-  workoutViewOpen = true;
+  trainingView = "workout";
   renderTraining();
   syncWakeLock();
   window.scrollTo(0, 0);
 });
 document.getElementById("minimize-workout-btn").addEventListener("click", () => {
-  workoutViewOpen = false;
+  trainingView = "start";
   renderTraining();
 });
 pauseBtn.addEventListener("click", togglePause);

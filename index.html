@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0b0b0e">
-<meta name="description" content="Workout-Tracker mit Stoppuhr, Sätzen, Vorlagen und Statistik. Deine Daten bleiben auf deinem Gerät.">
+<meta name="description" content="Workout-Tracker mit Planung, Stoppuhr, Sätzen und Statistik. Deine Daten bleiben auf deinem Gerät.">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -32,18 +32,43 @@
           <button type="button" id="open-workout-btn" class="btn btn-primary btn-block">Fortsetzen</button>
         </div>
 
-        <div id="start-card" class="card">
-          <div class="field-group">
-            <label for="workout-name-input">Name des Workouts (optional)</label>
-            <input type="text" id="workout-name-input" placeholder="z. B. Oberkörper" autocomplete="off" maxlength="60">
+        <section id="routines-section" class="start-section" aria-labelledby="routines-heading">
+          <h2 id="routines-heading">Meine Workouts</h2>
+          <ul id="routine-list" class="routine-list"></ul>
+          <div id="routines-empty" class="empty-state">
+            <p class="empty-title">Noch keine Workouts geplant</p>
+            <p>Lege ein Workout an und plane Übungen und Sätze. Die Zeit läuft erst, wenn du startest.</p>
           </div>
-          <button type="button" id="start-workout-btn" class="btn btn-primary btn-large">Workout starten</button>
-        </div>
+        </section>
 
-        <div id="templates-section">
-          <h2>Aus Vorlage starten</h2>
-          <ul id="template-list" class="template-list"></ul>
-          <p id="templates-empty" class="muted-small templates-empty">Noch keine Vorlagen. Nach einem Workout kannst du es in der Zusammenfassung oder im Verlauf als Vorlage speichern.</p>
+        <div class="start-actions">
+          <button type="button" id="new-workout-btn" class="btn btn-secondary btn-block btn-dashed">+ Neues Workout</button>
+        </div>
+      </div>
+
+      <div id="routine-screen" hidden>
+        <div class="workout-header">
+          <button type="button" id="routine-back-btn" class="icon-btn" aria-label="Zurück zu Meine Workouts">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <div class="workout-header-main">
+            <p class="workout-title">Workout planen</p>
+            <p class="workout-subtitle">Die Zeit läuft erst nach „Start“</p>
+          </div>
+          <span class="header-spacer" aria-hidden="true"></span>
+        </div>
+        <div class="field-group routine-name-field">
+          <label for="routine-name">Name</label>
+          <input type="text" id="routine-name" autocomplete="off" maxlength="60">
+        </div>
+        <div id="routine-exercises" class="exercise-list"></div>
+        <div id="routine-empty" class="empty-state">
+          <p class="empty-title">Noch keine Übungen</p>
+          <p>Füge Übungen hinzu und plane deine Sätze.</p>
+        </div>
+        <button type="button" id="routine-add-exercise-btn" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
+        <div class="workout-actions">
+          <button type="button" id="routine-start-btn" class="btn btn-primary btn-large btn-block">Start</button>
         </div>
       </div>
 
@@ -291,19 +316,19 @@
         <ul id="summary-prs" class="pr-list"></ul>
       </div>
       <p id="summary-no-prs" class="muted-small"></p>
-      <button type="button" id="summary-template-btn" class="btn btn-secondary btn-block">Als Vorlage speichern</button>
+      <button type="button" id="summary-template-btn" class="btn btn-secondary btn-block">Zu „Meine Workouts“ hinzufügen</button>
       <button type="button" id="summary-done-btn" class="btn btn-primary btn-block">Fertig</button>
     </div>
   </dialog>
 
   <dialog id="template-dialog" class="sheet" aria-labelledby="template-dialog-title">
     <form id="template-form" class="sheet-body" novalidate>
-      <h2 id="template-dialog-title" class="sheet-title">Als Vorlage speichern</h2>
+      <h2 id="template-dialog-title" class="sheet-title">Zu „Meine Workouts“ hinzufügen</h2>
       <div class="field-group">
-        <label for="template-name">Name der Vorlage</label>
+        <label for="template-name">Name</label>
         <input type="text" id="template-name" autocomplete="off" maxlength="60">
       </div>
-      <p class="muted-small">Übernommen werden die Übungen und die Anzahl der Sätze. Beim Start sind die Sätze leer und mit deinen letzten Werten vorbelegt.</p>
+      <p class="muted-small">Übernommen werden die Übungen und Sätze mit ihren Werten. Gibt es den Namen schon, wird dieser Eintrag aktualisiert.</p>
       <p id="template-error" class="form-error" role="alert"></p>
       <div class="dialog-actions">
         <button type="button" id="template-cancel" class="btn btn-secondary">Abbrechen</button>
@@ -329,7 +354,7 @@
       <div id="detail-exercises" class="exercise-list"></div>
       <p id="detail-empty" class="muted-small">Dieses Workout enthält keine Sätze.</p>
       <button type="button" id="detail-add-exercise" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
-      <button type="button" id="detail-template" class="btn btn-secondary btn-block">Vorlage aus diesem Workout</button>
+      <button type="button" id="detail-template" class="btn btn-secondary btn-block">Zu „Meine Workouts“ hinzufügen</button>
       <button type="button" id="detail-delete" class="btn btn-ghost-danger btn-block">Workout löschen</button>
     </div>
   </dialog>

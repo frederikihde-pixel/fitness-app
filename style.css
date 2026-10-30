@@ -960,15 +960,7 @@ body.rest-active .app-main {
 
 /* ---------- Templates ---------- */
 
-#templates-section h2 {
-  margin-top: 0.75rem;
-}
-
-.templates-empty {
-  margin: 0;
-}
-
-.template-list,
+.routine-list,
 .workout-list,
 .pr-list {
   list-style: none;
@@ -977,38 +969,6 @@ body.rest-active .app-main {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
-}
-
-.template-item {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.85rem 0.75rem 0.85rem 1.1rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.template-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.template-text span {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.template-start {
-  min-height: 44px;
-  padding: 0.5rem 1rem;
-  font-size: 0.92rem;
 }
 
 /* ---------- History ---------- */
@@ -1602,4 +1562,126 @@ button:disabled {
 
 .chip {
   min-height: 44px;
+}
+
+/* ---------- Meine Workouts ---------- */
+
+.start-section h2 {
+  margin-top: 0.5rem;
+}
+
+.routine-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem 1rem 1rem 1.15rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.routine-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.routine-name {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.routine-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.15rem;
+  margin-right: -0.35rem;
+}
+
+.routine-exercises,
+.routine-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.routine-exercises {
+  color: var(--text);
+}
+
+.routine-start {
+  margin-top: 0.6rem;
+  min-height: 52px;
+  font-size: 1.05rem;
+}
+
+.start-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.start-actions .btn-dashed {
+  margin-top: 0;
+}
+
+.workout-subtitle {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.header-spacer {
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.routine-name-field {
+  margin-bottom: 1.25rem;
+}
+
+/* ---------- Toast with undo ---------- */
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.toast.has-action {
+  pointer-events: auto;
+  padding: 0.35rem 0.4rem 0.35rem 1.1rem;
+  border-radius: var(--radius-md);
+}
+
+.toast-action {
+  min-height: 44px;
+  padding: 0 0.9rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.toast-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.toast {
+  visibility: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+}
+
+.toast.visible {
+  visibility: visible;
+  transition-delay: 0s;
 }
