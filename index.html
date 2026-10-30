@@ -91,6 +91,10 @@
           <p>Füge die erste Übung hinzu.</p>
         </div>
         <button type="button" id="add-exercise-btn" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
+        <div class="field-group notes-field">
+          <label for="workout-notes">Notiz</label>
+          <textarea id="workout-notes" rows="2" maxlength="1000" placeholder="z. B. Schulter fühlte sich gut an"></textarea>
+        </div>
 
         <div class="workout-actions">
           <button type="button" id="finish-workout-btn" class="btn btn-primary btn-block">Workout beenden</button>
@@ -155,10 +159,11 @@
           <div class="streak">
             <span id="streak-value" class="streak-value">0</span>
             <div class="streak-text">
-              <span class="streak-label">Wochen in Folge mit Training</span>
+              <span class="streak-label">Wochen in Folge mit Wochenziel</span>
               <span id="streak-sub" class="streak-sub"></span>
             </div>
           </div>
+          <div id="goal-progress" class="goal-progress" role="img"></div>
           <div id="calendar" class="calendar"></div>
           <p id="calendar-caption" class="muted-small"></p>
         </div>
@@ -182,7 +187,22 @@
             <button type="button" id="rest-setting-plus" class="stepper-btn" aria-label="Pausenzeit um 15 Sekunden erhöhen">+</button>
           </div>
         </div>
+        <div class="setting-row">
+          <div class="settings-text">
+            <span class="settings-label">Wochenziel</span>
+            <span class="settings-sub">Trainings pro Woche</span>
+          </div>
+          <div class="stepper stepper-compact">
+            <button type="button" id="goal-minus" class="stepper-btn" aria-label="Wochenziel verringern">−</button>
+            <output id="goal-value" class="stepper-output" aria-live="polite">3</output>
+            <button type="button" id="goal-plus" class="stepper-btn" aria-label="Wochenziel erhöhen">+</button>
+          </div>
+        </div>
       </div>
+
+      <h2>Übungen</h2>
+      <ul id="manage-exercise-list" class="manage-list"></ul>
+      <p id="manage-exercise-empty" class="muted-small">Übungen erscheinen hier, sobald du sie anlegst.</p>
 
       <h2>Backup</h2>
       <div class="card">
@@ -352,6 +372,10 @@
         <input type="text" id="detail-name" autocomplete="off" maxlength="60">
       </div>
       <p id="detail-meta" class="muted-small"></p>
+      <div class="field-group">
+        <label for="detail-notes">Notiz</label>
+        <textarea id="detail-notes" rows="2" maxlength="1000" placeholder="Keine Notiz"></textarea>
+      </div>
       <div id="detail-stats" class="stat-grid"></div>
       <div id="detail-exercises" class="exercise-list"></div>
       <p id="detail-empty" class="muted-small">Dieses Workout enthält keine Sätze.</p>
@@ -359,6 +383,29 @@
       <button type="button" id="detail-template" class="btn btn-secondary btn-block">Zu „Meine Workouts“ hinzufügen</button>
       <button type="button" id="detail-delete" class="btn btn-ghost-danger btn-block">Workout löschen</button>
     </div>
+  </dialog>
+
+  <dialog id="manage-dialog" class="sheet" aria-labelledby="manage-title">
+    <form id="manage-form" class="sheet-body" novalidate>
+      <div>
+        <h2 id="manage-title" class="sheet-title">Übung bearbeiten</h2>
+        <p id="manage-meta" class="muted-small"></p>
+      </div>
+      <div class="field-group">
+        <label for="manage-name">Name</label>
+        <input type="text" id="manage-name" autocomplete="off" maxlength="40">
+      </div>
+      <div class="field-group" id="manage-merge-group">
+        <label for="manage-merge">Zusammenführen mit</label>
+        <select id="manage-merge"></select>
+        <p class="muted-small">Alle Sätze wandern zur gewählten Übung, in jedem Workout und in der Statistik.</p>
+      </div>
+      <p id="manage-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="manage-cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="rest-timer" class="rest-timer" role="timer" aria-label="Pausen-Timer" hidden>

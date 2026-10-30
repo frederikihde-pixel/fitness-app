@@ -458,7 +458,7 @@ function startWorkout(template = null) {
   const now = Date.now();
   const workout = {
     id: createId("w"),
-    name: template?.name || formatWorkoutDefaultName(now),
+    name: template?.name && template.name !== NEW_ROUTINE_NAME ? template.name : formatWorkoutDefaultName(now),
     routineId: template?.id || null,
     notes: "",
     startedAt: now,
@@ -560,6 +560,20 @@ function updateTimers() {
   activeCardTimer.textContent = text;
 }
 
+const workoutNotes = document.getElementById("workout-notes");
+let notesSaveTimer = null;
+
+function saveSoon() {
+  clearTimeout(notesSaveTimer);
+  notesSaveTimer = setTimeout(saveState, 400);
+}
+
+workoutNotes.addEventListener("input", () => {
+  if (!state.activeWorkout) return;
+  state.activeWorkout.notes = workoutNotes.value;
+  saveSoon();
+});
+
 function renderTraining() {
   const workout = state.activeWorkout;
   if (trainingView === "workout" && !workout) trainingView = "start";
@@ -581,6 +595,7 @@ function renderTraining() {
     pauseBtn.setAttribute("aria-label", paused ? "Workout fortsetzen" : "Workout pausieren");
     workoutStatus.textContent = paused ? "Pausiert – die Zeit läuft nicht weiter" : "";
     workoutScreen.classList.toggle("is-paused", paused);
+    if (document.activeElement !== workoutNotes) workoutNotes.value = workout.notes || "";
     updateTimers();
   }
   renderWorkoutExercises();
@@ -1757,6 +1772,12 @@ function renderHistory() {
     if (stats.volume > 0) parts.push(`${formatNumber(Math.round(stats.volume), 0)} ${UNITS.weight}`);
     summary.textContent = parts.join(" · ");
     button.append(name, meta, summary);
+    if (workout.notes?.trim()) {
+      const note = document.createElement("span");
+      note.className = "workout-item-note";
+      note.textContent = workout.notes.trim();
+      button.appendChild(note);
+    }
     button.addEventListener("click", () => openDetail(workout.id));
     item.appendChild(button);
     workoutListEl.appendChild(item);
@@ -1765,6 +1786,15 @@ function renderHistory() {
 
 const detailDialog = document.getElementById("detail-dialog");
 const detailNameInput = document.getElementById("detail-name");
+const detailNotes = document.getElementById("detail-notes");
+
+detailNotes.addEventListener("input", () => {
+  const workout = state.workouts.find((item) => item.id === detailWorkoutId);
+  if (!workout) return;
+  workout.notes = detailNotes.value;
+  saveSoon();
+});
+detailNotes.addEventListener("change", () => renderHistory());
 let detailWorkoutId = null;
 
 function openDetail(workoutId) {
@@ -1781,6 +1811,7 @@ function renderDetail() {
     return;
   }
   if (document.activeElement !== detailNameInput) detailNameInput.value = workout.name;
+  if (document.activeElement !== detailNotes) detailNotes.value = workout.notes || "";
   document.getElementById("detail-meta").textContent = formatWorkoutMeta(workout);
   renderStatGrid(document.getElementById("detail-stats"), workout);
   renderExerciseList(document.getElementById("detail-exercises"), workout, { kind: "finished", workoutId: workout.id });
@@ -2362,36 +2393,54 @@ function renderWeekly(range) {
   renderBarChart(weeklyChart, weeks, format, tickOptions, `${mode === "volume" ? "Trainingsvolumen" : "Trainingszeit"} pro Woche über ${weeks.length} Wochen`);
 }
 
+function getWeeklyGoal() {
+  return Math.min(7, Math.max(1, state.settings.weeklyGoal || 3));
+}
+
+// A week counts towards the streak when it reaches the weekly goal.
 function computeStreaks() {
-  const weeks = [...new Set(state.workouts.map((workout) => startOfIsoWeek(workout.startedAt)))].sort((a, b) => a - b);
-  const weekSet = new Set(weeks);
+  const goal = getWeeklyGoal();
+  const perWeek = new Map();
+  for (const workout of state.workouts) {
+    const week = startOfIsoWeek(workout.startedAt);
+    perWeek.set(week, (perWeek.get(week) || 0) + 1);
+  }
+  const reached = (week) => (perWeek.get(week) || 0) >= goal;
+  const goalWeeks = [...perWeek.keys()].filter(reached).sort((a, b) => a - b);
   let longest = 0;
   let run = 0;
   let previous = null;
-  for (const week of weeks) {
+  for (const week of goalWeeks) {
     run = previous !== null && addDays(previous, 7) === week ? run + 1 : 1;
     longest = Math.max(longest, run);
     previous = week;
   }
   const thisWeek = startOfIsoWeek(Date.now());
-  let cursor = weekSet.has(thisWeek) ? thisWeek : addDays(thisWeek, -7);
+  let cursor = reached(thisWeek) ? thisWeek : addDays(thisWeek, -7);
   let current = 0;
-  while (weekSet.has(cursor)) {
+  while (reached(cursor)) {
     current += 1;
     cursor = addDays(cursor, -7);
   }
-  return { current, longest, thisWeekDone: weekSet.has(thisWeek) };
+  return { current, longest, goal, thisWeekCount: perWeek.get(thisWeek) || 0 };
 }
 
 function renderStreak() {
-  const { current, longest, thisWeekDone } = computeStreaks();
+  const { current, longest, goal, thisWeekCount } = computeStreaks();
   document.getElementById("streak-value").textContent = String(current);
-  let sub;
-  if (current === 0) sub = "Starte diese Woche eine neue Serie.";
-  else if (!thisWeekDone) sub = "Trainiere diese Woche, um die Serie zu halten.";
-  else sub = "Diese Woche ist schon geschafft.";
+  let sub = `Diese Woche ${thisWeekCount} von ${goal}.`;
+  if (thisWeekCount >= goal) sub += " Ziel erreicht.";
+  else if (current > 0) sub += ` Noch ${goal - thisWeekCount}, um die Serie zu halten.`;
   if (longest > 0) sub += ` Längste Serie: ${longest} ${longest === 1 ? "Woche" : "Wochen"}.`;
   document.getElementById("streak-sub").textContent = sub;
+  const progress = document.getElementById("goal-progress");
+  progress.innerHTML = "";
+  progress.setAttribute("aria-label", `${thisWeekCount} von ${goal} Trainings diese Woche`);
+  for (let i = 0; i < goal; i += 1) {
+    const dot = document.createElement("span");
+    dot.className = `goal-dot${i < thisWeekCount ? " is-done" : ""}`;
+    progress.appendChild(dot);
+  }
 }
 
 function renderCalendar(range) {
@@ -2572,6 +2621,8 @@ function formatDateTime(timestamp) {
 
 function renderDataTab() {
   renderRestSetting();
+  document.getElementById("goal-value").textContent = String(getWeeklyGoal());
+  renderManageList();
   document.getElementById("backup-status").textContent = state.settings.lastExportAt
     ? `Zuletzt exportiert: ${formatDateTime(state.settings.lastExportAt)}`
     : "Noch kein Backup exportiert.";
@@ -2698,6 +2749,132 @@ importFile.addEventListener("change", () => {
   importFile.value = "";
   if (file) importData(file);
 });
+
+// ---------- Weekly goal and exercise management ----------
+
+function changeWeeklyGoal(delta) {
+  state.settings.weeklyGoal = Math.min(7, Math.max(1, getWeeklyGoal() + delta));
+  persistAndRender();
+}
+
+document.getElementById("goal-minus").addEventListener("click", () => changeWeeklyGoal(-1));
+document.getElementById("goal-plus").addEventListener("click", () => changeWeeklyGoal(1));
+
+const manageList = document.getElementById("manage-exercise-list");
+const manageDialog = document.getElementById("manage-dialog");
+const manageForm = document.getElementById("manage-form");
+const manageNameInput = document.getElementById("manage-name");
+const manageMerge = document.getElementById("manage-merge");
+const manageError = document.getElementById("manage-error");
+let managedExercise = null;
+
+function allExerciseContainers() {
+  return [...state.workouts, ...state.routines, ...(state.activeWorkout ? [state.activeWorkout] : [])];
+}
+
+function countExerciseUse(name) {
+  return state.workouts.filter((workout) => workout.exercises.some((exercise) => exercise.name === name)).length;
+}
+
+function renderManageList() {
+  const names = Object.keys(state.exercises).sort((a, b) => a.localeCompare(b, "de"));
+  manageList.innerHTML = "";
+  document.getElementById("manage-exercise-empty").hidden = names.length > 0;
+  for (const name of names) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "manage-item";
+    const title = document.createElement("span");
+    title.className = "manage-name";
+    title.textContent = name;
+    const meta = document.createElement("span");
+    meta.className = "manage-meta";
+    const uses = countExerciseUse(name);
+    meta.textContent = `${EXERCISE_TYPES[getExerciseType(name)].label} · ${uses} ${uses === 1 ? "Workout" : "Workouts"}`;
+    button.append(title, meta);
+    button.setAttribute("aria-label", `${name} umbenennen oder zusammenführen`);
+    button.addEventListener("click", () => openManageDialog(name));
+    item.appendChild(button);
+    manageList.appendChild(item);
+  }
+}
+
+function openManageDialog(name) {
+  managedExercise = name;
+  const type = getExerciseType(name);
+  document.getElementById("manage-title").textContent = name;
+  document.getElementById("manage-meta").textContent = `${EXERCISE_TYPES[type].label} · in ${countExerciseUse(name)} Workouts`;
+  manageNameInput.value = name;
+  manageError.textContent = "";
+  const targets = Object.keys(state.exercises)
+    .filter((other) => other !== name && getExerciseType(other) === type)
+    .sort((a, b) => a.localeCompare(b, "de"));
+  manageMerge.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Nicht zusammenführen";
+  manageMerge.appendChild(none);
+  for (const target of targets) {
+    const option = document.createElement("option");
+    option.value = target;
+    option.textContent = target;
+    manageMerge.appendChild(option);
+  }
+  document.getElementById("manage-merge-group").hidden = targets.length === 0;
+  manageDialog.showModal();
+}
+
+// Renames an exercise everywhere; if the new name already exists the two are merged.
+function renameExerciseEverywhere(oldName, newName) {
+  for (const container of allExerciseContainers()) {
+    const byName = new Map();
+    container.exercises = container.exercises.filter((exercise) => {
+      if (exercise.name === oldName) exercise.name = newName;
+      const existing = byName.get(exercise.name);
+      if (existing) {
+        existing.sets.push(...exercise.sets);
+        return false;
+      }
+      byName.set(exercise.name, exercise);
+      return true;
+    });
+  }
+  const entry = state.exercises[oldName];
+  delete state.exercises[oldName];
+  if (!state.exercises[newName]) state.exercises[newName] = entry;
+  if (statsView.exercise === oldName) statsView.exercise = newName;
+}
+
+manageForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const oldName = managedExercise;
+  const mergeTarget = manageMerge.value;
+  const newName = mergeTarget || normalizeExerciseName(manageNameInput.value);
+  if (!newName) {
+    manageError.textContent = "Bitte gib einen Namen ein.";
+    return;
+  }
+  if (newName === oldName) {
+    manageDialog.close();
+    return;
+  }
+  if (state.exercises[newName] && getExerciseType(newName) !== getExerciseType(oldName)) {
+    manageError.textContent = `„${newName}“ gibt es schon mit einem anderen Typ. Wähle einen anderen Namen.`;
+    return;
+  }
+  const merging = Boolean(state.exercises[newName]);
+  const snapshot = JSON.stringify(state);
+  renameExerciseEverywhere(oldName, newName);
+  manageDialog.close();
+  persistAndRender();
+  showUndoToast(merging ? `„${oldName}“ mit „${newName}“ zusammengeführt` : `Umbenannt in „${newName}“`, () => {
+    state = JSON.parse(snapshot);
+    persistAndRender();
+  });
+});
+
+document.getElementById("manage-cancel").addEventListener("click", () => manageDialog.close());
 
 // ---------- Wake Lock ----------
 
