@@ -68,7 +68,7 @@ function emptyState() {
     workouts: [],
     templates: [],
     activeWorkout: null,
-    settings: { restSeconds: 90 },
+    settings: { restSeconds: 90, statPeriod: "3m" },
   };
 }
 
@@ -210,49 +210,9 @@ if (!storage.available) {
 }
 state = loadState();
 
-function workoutDateStr(workout) {
-  return toDateStr(new Date(workout.startedAt));
-}
-
 function getExerciseType(name) {
   return state.exercises[name]?.type || "bodyweight";
 }
-
-// Flattens workouts into one entry per exercise per workout for the weekly overview and statistics.
-function loadEntries() {
-  const entries = [];
-  for (const workout of state.workouts) {
-    const date = workoutDateStr(workout);
-    workout.exercises.forEach((exercise, index) => {
-      const sets = exercise.sets.filter((set) => !set.planned);
-      if (sets.length === 0) return;
-      const sum = (key) => sets.reduce((total, set) => total + (Number(set[key]) || 0), 0);
-      const durationSec = sum("durationSec");
-      entries.push({
-        id: workout.startedAt + index,
-        workoutId: workout.id,
-        exercise: exercise.name,
-        reps: sum("reps") || null,
-        distance: roundTo(sum("distance"), 2) || null,
-        duration: durationSec ? roundTo(durationSec / 60, 1) : null,
-        date,
-      });
-    });
-  }
-  return entries;
-}
-
-const weeklyOverview = document.getElementById("weekly-overview");
-const emptyOverview = document.getElementById("empty-overview");
-
-const statChipRow = document.getElementById("stat-chips");
-const chartContainer = document.getElementById("trend-chart-container");
-const chartEmpty = document.getElementById("chart-empty");
-const bestList = document.getElementById("best-list");
-const emptyBests = document.getElementById("empty-bests");
-const weekCompare = document.getElementById("week-compare");
-
-let selectedStatExercise = null;
 
 function normalizeExerciseName(name) {
   return name
@@ -263,16 +223,13 @@ function normalizeExerciseName(name) {
     .join(" ");
 }
 
-function getIsoWeekKey(dateStr) {
-  const date = new Date(dateStr + "T00:00:00");
-  const target = new Date(date.valueOf());
-  const dayNr = (date.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3);
+function getIsoWeekNumber(timestamp) {
+  const target = new Date(timestamp);
+  target.setHours(0, 0, 0, 0);
+  target.setDate(target.getDate() - ((target.getDay() + 6) % 7) + 3);
   const firstThursday = new Date(target.getFullYear(), 0, 4);
-  const firstDayNr = (firstThursday.getDay() + 6) % 7;
-  firstThursday.setDate(firstThursday.getDate() - firstDayNr + 3);
-  const weekNumber = 1 + Math.round((target - firstThursday) / (7 * 24 * 60 * 60 * 1000));
-  return `${target.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+  firstThursday.setDate(firstThursday.getDate() - ((firstThursday.getDay() + 6) % 7) + 3);
+  return 1 + Math.round((target - firstThursday) / (7 * 24 * 60 * 60 * 1000));
 }
 
 function roundTo(value, decimals) {
@@ -287,311 +244,8 @@ function toDateStr(date) {
   return `${y}-${m}-${d}`;
 }
 
-function formatShortDate(dateStr) {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
-}
-
-function computeWeeklyTotals(entries) {
-  const totals = {};
-  const workoutsPerWeek = {};
-  for (const entry of entries) {
-    const weekKey = getIsoWeekKey(entry.date);
-    if (!totals[weekKey]) {
-      totals[weekKey] = { count: 0, reps: 0, distance: 0, duration: 0 };
-      workoutsPerWeek[weekKey] = new Set();
-    }
-    workoutsPerWeek[weekKey].add(entry.workoutId);
-    totals[weekKey].count = workoutsPerWeek[weekKey].size;
-    if (entry.reps) totals[weekKey].reps += Number(entry.reps);
-    if (entry.distance) totals[weekKey].distance += Number(entry.distance);
-    if (entry.duration) totals[weekKey].duration += Number(entry.duration);
-  }
-  return totals;
-}
-
-// Returns the most recent entry per exercise, sorted by most recently used first.
-function getExerciseRecency(entries) {
-  const latestByExercise = new Map();
-  for (const entry of entries) {
-    const current = latestByExercise.get(entry.exercise);
-    if (!current || entry.date > current.date || (entry.date === current.date && entry.id > current.id)) {
-      latestByExercise.set(entry.exercise, entry);
-    }
-  }
-  return [...latestByExercise.values()].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-}
-
-function renderWeeklyOverview() {
-  const entries = loadEntries();
-  weeklyOverview.innerHTML = "";
-
-  const totalsByWeek = computeWeeklyTotals(entries);
-
-  const weekKeys = Object.keys(totalsByWeek).sort().reverse();
-
-  if (weekKeys.length === 0) {
-    emptyOverview.style.display = "block";
-    return;
-  }
-  emptyOverview.style.display = "none";
-
-  for (const weekKey of weekKeys) {
-    const totals = totalsByWeek[weekKey];
-    const li = document.createElement("li");
-
-    const label = document.createElement("span");
-    label.className = "week-label";
-    label.textContent = weekKey.replace("-W", " · KW ");
-
-    const stats = document.createElement("div");
-    stats.className = "week-stats";
-
-    const statParts = [
-      { value: totals.reps, text: `${totals.reps} Wdh.` },
-      { value: totals.distance, text: `${roundTo(totals.distance, 2)} km` },
-      { value: totals.duration, text: `${roundTo(totals.duration, 0)} min` },
-    ].filter((part) => part.value > 0);
-
-    if (statParts.length === 0) {
-      statParts.push({ text: "0 Wdh." });
-    }
-
-    for (const part of statParts) {
-      const statEl = document.createElement("span");
-      statEl.className = "week-total";
-      statEl.textContent = part.text;
-      stats.appendChild(statEl);
-    }
-
-    li.append(label, stats);
-    weeklyOverview.appendChild(li);
-  }
-}
-
-const METRIC_LABELS = {
-  reps: { unit: "Wdh.", bestLabel: "Beste Wiederholungen" },
-  distance: { unit: "km", bestLabel: "Längste Distanz" },
-  duration: { unit: "min", bestLabel: "Längste Zeit" },
-};
-
-function getExerciseMetricKey(entries, exerciseName) {
-  const counts = { reps: 0, distance: 0, duration: 0 };
-  for (const entry of entries) {
-    if (entry.exercise !== exerciseName) continue;
-    if (entry.reps) counts.reps += 1;
-    if (entry.distance) counts.distance += 1;
-    if (entry.duration) counts.duration += 1;
-  }
-  if (counts.reps > 0 && counts.reps >= counts.distance && counts.reps >= counts.duration) return "reps";
-  if (counts.distance > 0 && counts.distance >= counts.duration) return "distance";
-  if (counts.duration > 0) return "duration";
-  return null;
-}
-
-function renderStatChips(recents) {
-  statChipRow.innerHTML = "";
-  for (const entry of recents) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    if (entry.exercise === selectedStatExercise) chip.classList.add("selected");
-    chip.textContent = entry.exercise;
-    chip.addEventListener("click", () => {
-      selectedStatExercise = entry.exercise;
-      renderStatistik();
-    });
-    statChipRow.appendChild(chip);
-  }
-}
-
-function buildTrendChartSvg(points, unit) {
-  const width = 320;
-  const height = 150;
-  const padX = 16;
-  const padTop = 24;
-  const padBottom = 26;
-
-  const dates = points.map((p) => new Date(p.date + "T00:00:00").getTime());
-  const values = points.map((p) => p.value);
-  const minDate = Math.min(...dates);
-  const maxDate = Math.max(...dates);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-  const dateSpan = maxDate - minDate || 1;
-  const valSpan = maxVal - minVal || 1;
-
-  const xFor = (d) => (points.length === 1 ? width / 2 : padX + ((d - minDate) / dateSpan) * (width - padX * 2));
-  const yFor = (v) => height - padBottom - ((v - minVal) / valSpan) * (height - padTop - padBottom);
-
-  const coords = points.map((p, i) => ({
-    x: xFor(dates[i]),
-    y: points.length === 1 ? height / 2 : yFor(p.value),
-    value: p.value,
-    date: p.date,
-  }));
-
-  const linePoints = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
-
-  const dots = coords
-    .map((c, i) => {
-      const isLast = i === coords.length - 1;
-      const r = isLast ? 4.5 : 3;
-      const cls = isLast ? "chart-dot chart-dot-current" : "chart-dot";
-      return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${r}" class="${cls}" />`;
-    })
-    .join("");
-
-  const last = coords[coords.length - 1];
-  const first = coords[0];
-  const labelAnchor = last.x > width - 40 ? "end" : "middle";
-  const labelY = Math.max(12, last.y - 10).toFixed(1);
-
-  const lineOrDot = points.length > 1 ? `<polyline points="${linePoints}" class="chart-line" />` : "";
-
-  return `
-    <svg viewBox="0 0 ${width} ${height}" class="trend-svg">
-      ${lineOrDot}
-      ${dots}
-      <text x="${last.x.toFixed(1)}" y="${labelY}" text-anchor="${labelAnchor}" class="chart-value-label">${last.value} ${unit}</text>
-      <text x="${padX}" y="${height - 6}" class="chart-date-label">${formatShortDate(first.date)}</text>
-      <text x="${width - padX}" y="${height - 6}" text-anchor="end" class="chart-date-label">${formatShortDate(last.date)}</text>
-    </svg>
-  `;
-}
-
-function renderTrendChart(entries, exerciseName) {
-  const metricKey = exerciseName ? getExerciseMetricKey(entries, exerciseName) : null;
-  const points = metricKey
-    ? entries
-        .filter((entry) => entry.exercise === exerciseName && entry[metricKey])
-        .map((entry) => ({ date: entry.date, value: Number(entry[metricKey]) }))
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .slice(-20)
-    : [];
-
-  if (points.length === 0) {
-    chartContainer.innerHTML = "";
-    chartEmpty.style.display = "block";
-    return;
-  }
-  chartEmpty.style.display = "none";
-  chartContainer.innerHTML = buildTrendChartSvg(points, METRIC_LABELS[metricKey].unit);
-}
-
-function renderPersonalBests(entries, exerciseName) {
-  bestList.innerHTML = "";
-  const relevant = entries.filter((entry) => entry.exercise === exerciseName);
-
-  const bests = [];
-  for (const key of ["reps", "distance", "duration"]) {
-    const best = relevant
-      .filter((entry) => entry[key])
-      .sort((a, b) => b[key] - a[key] || b.date.localeCompare(a.date))[0];
-    if (best) {
-      bests.push({
-        label: METRIC_LABELS[key].bestLabel,
-        value: `${best[key]} ${METRIC_LABELS[key].unit}`,
-        date: best.date,
-      });
-    }
-  }
-
-  if (bests.length === 0) {
-    emptyBests.style.display = "block";
-    return;
-  }
-  emptyBests.style.display = "none";
-
-  for (const best of bests) {
-    const li = document.createElement("li");
-
-    const label = document.createElement("span");
-    label.className = "best-label";
-    label.textContent = best.label;
-
-    const stats = document.createElement("div");
-    stats.className = "best-stats";
-
-    const valueEl = document.createElement("span");
-    valueEl.className = "best-value";
-    valueEl.textContent = best.value;
-
-    const dateEl = document.createElement("span");
-    dateEl.className = "best-date";
-    dateEl.textContent = new Date(best.date + "T00:00:00").toLocaleDateString("de-DE");
-
-    stats.append(valueEl, dateEl);
-    li.append(label, stats);
-    bestList.appendChild(li);
-  }
-}
-
-function renderWeekComparison(entries) {
-  const totals = computeWeeklyTotals(entries);
-
-  const today = new Date();
-  const currentWeekKey = getIsoWeekKey(toDateStr(today));
-  const previousDate = new Date(today);
-  previousDate.setDate(today.getDate() - 7);
-  const previousWeekKey = getIsoWeekKey(toDateStr(previousDate));
-
-  const empty = { count: 0, reps: 0, distance: 0, duration: 0 };
-  const current = totals[currentWeekKey] || empty;
-  const previous = totals[previousWeekKey] || empty;
-
-  const rows = [
-    { label: "Einheiten", unit: "", decimals: 0, current: current.count, previous: previous.count, always: true },
-    { label: "Wiederholungen", unit: "Wdh.", decimals: 0, current: current.reps, previous: previous.reps },
-    { label: "Distanz", unit: "km", decimals: 2, current: current.distance, previous: previous.distance },
-    { label: "Zeit", unit: "min", decimals: 0, current: current.duration, previous: previous.duration },
-  ].filter((row) => row.always || row.current > 0 || row.previous > 0);
-
-  weekCompare.innerHTML = "";
-
-  for (const row of rows) {
-    const delta = roundTo(row.current - row.previous, row.decimals);
-    const currentValue = roundTo(row.current, row.decimals);
-
-    const rowEl = document.createElement("div");
-    rowEl.className = "compare-row";
-
-    const label = document.createElement("span");
-    label.className = "compare-label";
-    label.textContent = row.label;
-
-    const values = document.createElement("div");
-    values.className = "compare-values";
-
-    const currentEl = document.createElement("span");
-    currentEl.className = "compare-current";
-    currentEl.textContent = row.unit ? `${currentValue} ${row.unit}` : `${currentValue}`;
-
-    const deltaEl = document.createElement("span");
-    const direction = delta > 0 ? "positive" : delta < 0 ? "negative" : "neutral";
-    deltaEl.className = `compare-delta ${direction}`;
-    const sign = delta > 0 ? "+" : "";
-    deltaEl.textContent = `${sign}${delta}${row.unit ? " " + row.unit : ""} ggü. Vorwoche`;
-
-    values.append(currentEl, deltaEl);
-    rowEl.append(label, values);
-    weekCompare.appendChild(rowEl);
-  }
-}
-
-function renderStatistik() {
-  const entries = loadEntries();
-  const recents = getExerciseRecency(entries);
-
-  if (recents.length === 0) {
-    selectedStatExercise = null;
-  } else if (!selectedStatExercise || !recents.some((entry) => entry.exercise === selectedStatExercise)) {
-    selectedStatExercise = recents[0].exercise;
-  }
-
-  renderStatChips(recents);
-  renderTrendChart(entries, selectedStatExercise);
-  renderPersonalBests(entries, selectedStatExercise);
-  renderWeekComparison(entries);
+function formatShortDate(timestamp) {
+  return new Date(timestamp).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
 }
 
 // ---------- Formatting ----------
@@ -1734,6 +1388,746 @@ document.getElementById("detail-delete").addEventListener("click", async () => {
 
 document.getElementById("history-start-btn").addEventListener("click", () => switchTab("training"));
 
+// ---------- Statistics: periods and helpers ----------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const PERIODS = {
+  "4w": { days: 28, compareLabel: "vorherige 4 Wochen", trendLabel: "in 4 Wochen" },
+  "3m": { days: 91, compareLabel: "vorherige 3 Monate", trendLabel: "in 3 Monaten" },
+  "1y": { days: 365, compareLabel: "vorheriges Jahr", trendLabel: "in einem Jahr" },
+  all: { days: null, compareLabel: null, trendLabel: "seit dem ersten Training" },
+};
+
+const ARROW_DOWN_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+const FLAT_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg>';
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+function startOfDay(timestamp) {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function addDays(timestamp, days) {
+  const date = new Date(timestamp);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+}
+
+function startOfIsoWeek(timestamp) {
+  const date = new Date(startOfDay(timestamp));
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return date.getTime();
+}
+
+function formatLongDate(timestamp) {
+  return new Date(timestamp).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function getPeriodKey() {
+  return PERIODS[state.settings.statPeriod] ? state.settings.statPeriod : "3m";
+}
+
+function getPeriodRange(key) {
+  const end = addDays(startOfDay(Date.now()), 1);
+  const days = PERIODS[key].days;
+  if (!days) {
+    const first = state.workouts.reduce((min, workout) => Math.min(min, workout.startedAt), Date.now());
+    return { start: startOfDay(first), end, prevStart: null, prevEnd: null };
+  }
+  const start = addDays(end, -days);
+  return { start, end, prevStart: addDays(start, -days), prevEnd: start };
+}
+
+function getWorkoutsBetween(start, end) {
+  return state.workouts
+    .filter((workout) => workout.startedAt >= start && workout.startedAt < end)
+    .sort((a, b) => a.startedAt - b.startedAt);
+}
+
+// At most maxCount evenly spaced, "round" tick values covering [min, max].
+function niceTicks(min, max, { maxCount = 5, time = false, minutes = false, integer = false, includeZero = false } = {}) {
+  if (includeZero) min = Math.min(0, min);
+  if (min === max) {
+    const pad = time ? 30 : Math.max(Math.abs(max) * 0.1, integer ? 1 : 0.5);
+    min = Math.max(0, min - pad);
+    max += pad;
+  }
+  const raw = (max - min) / (maxCount - 1);
+  let step;
+  if (time) {
+    step = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200].find((candidate) => candidate >= raw) || 3600 * Math.ceil(raw / 3600);
+  } else if (minutes) {
+    step = [5, 10, 15, 30, 60, 90, 120, 180, 240, 360, 480, 600].find((candidate) => candidate >= raw) || 60 * Math.ceil(raw / 60);
+  } else {
+    const magnitude = 10 ** Math.floor(Math.log10(raw));
+    step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((candidate) => candidate >= raw);
+    if (integer) step = Math.max(1, Math.ceil(step));
+  }
+  let lo = Math.floor(min / step) * step;
+  let hi = Math.ceil(max / step) * step;
+  while (Math.round((hi - lo) / step) + 1 > maxCount) {
+    step *= 2;
+    lo = Math.floor(min / step) * step;
+    hi = Math.ceil(max / step) * step;
+  }
+  const ticks = [];
+  for (let value = lo; value <= hi + step * 1e-6; value += step) ticks.push(roundTo(value, 6));
+  return ticks;
+}
+
+// ---------- Statistics: charts ----------
+
+const CHART = { width: 340, height: 200, padL: 46, padR: 16, padT: 20, padB: 28 };
+
+function attachChartTooltip(container, targets, onSelect) {
+  const tooltip = container.querySelector(".chart-tooltip");
+  const show = (index) => {
+    const target = targets[index];
+    tooltip.textContent = target.text;
+    tooltip.hidden = false;
+    const leftPct = (target.x / CHART.width) * 100;
+    tooltip.style.left = `${leftPct}%`;
+    tooltip.style.top = `${(target.y / CHART.height) * 100}%`;
+    tooltip.classList.toggle("align-start", leftPct < 22);
+    tooltip.classList.toggle("align-end", leftPct > 78);
+    onSelect(index);
+  };
+  container.querySelectorAll("[data-index]").forEach((element) => {
+    const index = Number(element.dataset.index);
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      show(index);
+    });
+    element.addEventListener("focus", () => show(index));
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        show(index);
+      }
+    });
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.("[data-index]")) return;
+  document.querySelectorAll(".chart-tooltip").forEach((tooltip) => (tooltip.hidden = true));
+  document.querySelectorAll(".chart-focus-ring").forEach((ring) => ring.setAttribute("visibility", "hidden"));
+  document.querySelectorAll(".bar.is-selected").forEach((bar) => bar.classList.remove("is-selected"));
+});
+
+function yAxisSvg(ticks, y, tickFormat) {
+  const { width: W, padL, padR } = CHART;
+  return ticks
+    .map((value) => {
+      const yy = y(value).toFixed(1);
+      return `<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" class="grid-line"/><text x="${padL - 8}" y="${yy}" class="axis-label" text-anchor="end" dominant-baseline="middle">${escapeHtml(tickFormat(value))}</text>`;
+    })
+    .join("");
+}
+
+function renderLineChart(container, points, metric, domain, ariaLabel) {
+  const { width: W, height: H, padL, padR, padT, padB } = CHART;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const values = points.map((point) => point.value);
+  const ticks = niceTicks(Math.min(...values), Math.max(...values), { time: metric.time, integer: metric.integer });
+  const yMin = ticks[0];
+  const yMax = ticks[ticks.length - 1];
+  let [d0, d1] = domain;
+  if (d1 - d0 < DAY_MS) {
+    d0 -= DAY_MS;
+    d1 += DAY_MS;
+  }
+  const x = (t) => padL + ((t - d0) / (d1 - d0)) * innerW;
+  const y = (v) => padT + (1 - (v - yMin) / (yMax - yMin || 1)) * innerH;
+  const baseY = (padT + innerH).toFixed(1);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="${escapeHtml(ariaLabel)}">`;
+  svg += yAxisSvg(ticks, y, metric.tick);
+  svg += `<line x1="${padL}" x2="${W - padR}" y1="${baseY}" y2="${baseY}" class="axis-line"/>`;
+  for (let i = 0; i < 4; i += 1) {
+    const t = d0 + (i / 3) * (d1 - d0);
+    const anchor = i === 0 ? "start" : i === 3 ? "end" : "middle";
+    svg += `<text x="${x(t).toFixed(1)}" y="${H - 8}" class="axis-label" text-anchor="${anchor}">${formatShortDate(t)}</text>`;
+  }
+
+  const coords = points.map((point) => ({ x: x(point.t), y: y(point.value) }));
+  if (coords.length > 1) {
+    const line = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
+    const first = coords[0];
+    const last = coords[coords.length - 1];
+    svg += `<polygon points="${first.x.toFixed(1)},${baseY} ${line} ${last.x.toFixed(1)},${baseY}" class="chart-area"/>`;
+    svg += `<polyline points="${line}" class="chart-line"/>`;
+  }
+  coords.forEach((c, i) => {
+    const isLast = i === coords.length - 1;
+    svg += `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${isLast ? 5.5 : 3}" class="chart-dot${isLast ? " chart-dot-current" : ""}"/>`;
+  });
+  const lastCoord = coords[coords.length - 1];
+  const labelAnchor = lastCoord.x > W - 70 ? "end" : lastCoord.x < padL + 40 ? "start" : "middle";
+  svg += `<text x="${lastCoord.x.toFixed(1)}" y="${Math.max(12, lastCoord.y - 12).toFixed(1)}" class="chart-value-label" text-anchor="${labelAnchor}">${escapeHtml(metric.format(points[points.length - 1].value))}</text>`;
+  svg += `<circle class="chart-focus-ring" r="9" cx="0" cy="0" visibility="hidden"/>`;
+  coords.forEach((c, i) => {
+    const label = `${formatLongDate(points[i].t)}: ${metric.format(points[i].value)}`;
+    svg += `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="14" class="chart-hit" data-index="${i}" tabindex="0" role="button" aria-label="${escapeHtml(label)}"/>`;
+  });
+  svg += `</svg><div class="chart-tooltip" role="status" hidden></div>`;
+  container.innerHTML = svg;
+
+  const ring = container.querySelector(".chart-focus-ring");
+  attachChartTooltip(
+    container,
+    coords.map((c, i) => ({ x: c.x, y: c.y, text: `${formatLongDate(points[i].t)} · ${metric.format(points[i].value)}` })),
+    (index) => {
+      ring.setAttribute("cx", coords[index].x.toFixed(1));
+      ring.setAttribute("cy", coords[index].y.toFixed(1));
+      ring.setAttribute("visibility", "visible");
+    }
+  );
+}
+
+function renderBarChart(container, weeks, format, tickOptions, ariaLabel) {
+  const { width: W, height: H, padL, padR, padT, padB } = CHART;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const max = Math.max(...weeks.map((week) => week.value));
+  const ticks = niceTicks(0, max, { includeZero: true, ...tickOptions });
+  const yMax = ticks[ticks.length - 1] || 1;
+  const y = (v) => padT + (1 - v / yMax) * innerH;
+  const slot = innerW / weeks.length;
+  const barW = Math.max(2, Math.min(26, slot * 0.66));
+  const baseY = padT + innerH;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="${escapeHtml(ariaLabel)}">`;
+  svg += yAxisSvg(ticks, y, tickOptions.tickFormat);
+  svg += `<line x1="${padL}" x2="${W - padR}" y1="${baseY}" y2="${baseY}" class="axis-line"/>`;
+  const labelIndexes =
+    weeks.length <= 4 ? weeks.map((_, i) => i) : [0, Math.round((weeks.length - 1) / 3), Math.round(((weeks.length - 1) * 2) / 3), weeks.length - 1];
+  for (const i of new Set(labelIndexes)) {
+    const cx = padL + slot * (i + 0.5);
+    const anchor = weeks.length > 4 && i === 0 ? "start" : weeks.length > 4 && i === weeks.length - 1 ? "end" : "middle";
+    const xPos = anchor === "start" ? cx - barW / 2 : anchor === "end" ? cx + barW / 2 : cx;
+    svg += `<text x="${xPos.toFixed(1)}" y="${H - 8}" class="axis-label" text-anchor="${anchor}">${formatShortDate(weeks[i].start)}</text>`;
+  }
+  const targets = [];
+  weeks.forEach((week, i) => {
+    const cx = padL + slot * (i + 0.5);
+    const top = y(week.value);
+    const height = Math.max(week.value > 0 ? 2 : 0, baseY - top);
+    const isCurrent = i === weeks.length - 1;
+    svg += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${(baseY - height).toFixed(1)}" width="${barW.toFixed(1)}" height="${height.toFixed(1)}" rx="${Math.min(4, barW / 2).toFixed(1)}" class="bar${isCurrent ? " bar-current" : ""}" data-bar="${i}"/>`;
+    const label = `KW ${getIsoWeekNumber(week.start)} (${formatShortDate(week.start)}–${formatShortDate(addDays(week.start, 6))}): ${format(week.value)}`;
+    svg += `<rect x="${(padL + slot * i).toFixed(1)}" y="${padT}" width="${slot.toFixed(1)}" height="${innerH}" class="chart-hit" data-index="${i}" tabindex="0" role="button" aria-label="${escapeHtml(label)}"/>`;
+    targets.push({ x: cx, y: baseY - height, text: label });
+  });
+  svg += `</svg><div class="chart-tooltip" role="status" hidden></div>`;
+  container.innerHTML = svg;
+  attachChartTooltip(container, targets, (index) => {
+    container.querySelectorAll(".bar").forEach((bar) => bar.classList.toggle("is-selected", Number(bar.dataset.bar) === index));
+  });
+}
+
+// ---------- Statistics: sections ----------
+
+const statsView = { exercise: null, metricByType: {}, weekly: "volume" };
+
+const statsEmpty = document.getElementById("stats-empty");
+const statsContent = document.getElementById("stats-content");
+const periodEmpty = document.getElementById("period-empty");
+const kpiGrid = document.getElementById("kpi-grid");
+const trendChips = document.getElementById("trend-exercise-chips");
+const trendMetricToggle = document.getElementById("trend-metric-toggle");
+const trendHeadline = document.getElementById("trend-headline");
+const trendChange = document.getElementById("trend-change");
+const trendChart = document.getElementById("trend-chart");
+const trendEmpty = document.getElementById("trend-empty");
+const weeklyHeadline = document.getElementById("weekly-headline");
+const weeklyChart = document.getElementById("weekly-chart");
+const weeklyEmpty = document.getElementById("weekly-empty");
+const calendarEl = document.getElementById("calendar");
+const calendarCaption = document.getElementById("calendar-caption");
+const bestsList = document.getElementById("bests-list");
+const bestsEmpty = document.getElementById("bests-empty");
+
+function computeKpis(workouts) {
+  let totalMs = 0;
+  let timedCount = 0;
+  let volume = 0;
+  for (const workout of workouts) {
+    const stats = computeWorkoutStats(workout);
+    if (stats.durationMs > 0) {
+      totalMs += stats.durationMs;
+      timedCount += 1;
+    }
+    volume += stats.volume;
+  }
+  return { count: workouts.length, totalMs, avgMs: timedCount ? totalMs / timedCount : 0, volume };
+}
+
+function setChange(element, { delta, text, improved, neutral }) {
+  const icon = delta > 0 ? ARROW_UP_ICON : delta < 0 ? ARROW_DOWN_ICON : FLAT_ICON;
+  element.className = `${element.dataset.baseClass || element.className.split(" ")[0]} ${
+    delta === 0 || neutral ? "is-neutral" : improved ? "is-positive" : "is-negative"
+  }`;
+  element.innerHTML = `${icon}<span>${escapeHtml(text)}</span>`;
+}
+
+function renderKpis(range, workouts, periodKey) {
+  const current = computeKpis(workouts);
+  const previous = range.prevStart !== null ? computeKpis(getWorkoutsBetween(range.prevStart, range.prevEnd)) : null;
+  const volumeFormat = (v) => `${formatNumber(Math.round(v), 0)} ${UNITS.weight}`;
+  const items = [
+    { label: "Workouts", value: current.count, prev: previous?.count, format: (v) => String(v) },
+    { label: "Gesamtzeit", value: current.totalMs, prev: previous?.totalMs, format: formatDurationLong },
+    { label: "Ø Dauer", value: current.avgMs, prev: previous?.avgMs, format: formatDurationLong, neutral: true },
+    { label: "Gesamtvolumen", value: current.volume, prev: previous?.volume, format: volumeFormat },
+  ];
+  kpiGrid.innerHTML = "";
+  for (const item of items) {
+    const card = document.createElement("div");
+    card.className = "kpi-card";
+    const label = document.createElement("span");
+    label.className = "kpi-label";
+    label.textContent = item.label;
+    const value = document.createElement("span");
+    value.className = "kpi-value";
+    value.textContent = item.format(item.value);
+    const change = document.createElement("p");
+    change.className = "kpi-change";
+    change.dataset.baseClass = "kpi-change";
+    if (previous === null) {
+      change.textContent = "gesamter Zeitraum";
+      change.classList.add("is-neutral");
+    } else {
+      const rawDelta = item.value - item.prev;
+      const delta = item.format(Math.abs(rawDelta)) === item.format(0) ? 0 : Math.sign(rawDelta);
+      const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+      setChange(change, {
+        delta,
+        text: `${sign}${item.format(Math.abs(rawDelta))} ggü. ${PERIODS[periodKey].compareLabel}`,
+        improved: delta > 0,
+        neutral: item.neutral,
+      });
+    }
+    card.append(label, value, change);
+    kpiGrid.appendChild(card);
+  }
+}
+
+const sumOf = (values) => values.reduce((total, value) => total + (Number(value) || 0), 0);
+const maxOf = (values) => {
+  const valid = values.filter((value) => value !== null && Number.isFinite(value));
+  return valid.length ? Math.max(...valid) : null;
+};
+
+const TREND_METRICS = {
+  strength: [
+    {
+      label: "Geschätztes Maximum",
+      value: (sets) => maxOf(sets.map((set) => estimateOneRepMax(set.weight, set.reps))),
+      format: (v) => `${formatNumber(v, 1)} ${UNITS.weight}`,
+      tick: (v) => formatNumber(v, 1),
+    },
+    {
+      label: "Volumen",
+      value: (sets) => sumOf(sets.map((set) => (set.weight > 0 && set.reps > 0 ? set.weight * set.reps : 0))),
+      format: (v) => `${formatNumber(Math.round(v), 0)} ${UNITS.weight}`,
+      tick: (v) => formatNumber(v, 0),
+    },
+  ],
+  bodyweight: [
+    {
+      label: "Wiederholungen pro Training",
+      value: (sets) => sumOf(sets.map((set) => set.reps)),
+      format: (v) => `${formatNumber(v, 0)} Wdh.`,
+      tick: (v) => formatNumber(v, 0),
+      integer: true,
+    },
+  ],
+  endurance: [
+    {
+      label: "Tempo",
+      value: (sets) => {
+        const valid = sets.filter((set) => set.distance > 0 && set.durationSec > 0);
+        return valid.length ? sumOf(valid.map((set) => set.durationSec)) / sumOf(valid.map((set) => set.distance)) : null;
+      },
+      format: (v) => formatPace(v),
+      tick: (v) => formatClock(Math.round(v) * 1000),
+      time: true,
+      lowerIsBetter: true,
+      hint: "niedriger ist schneller",
+    },
+    {
+      label: "Distanz",
+      value: (sets) => sumOf(sets.map((set) => set.distance)),
+      format: (v) => `${formatNumber(v)} ${UNITS.distance}`,
+      tick: (v) => formatNumber(v, 1),
+    },
+  ],
+  timed: [
+    {
+      label: "Längste Dauer",
+      value: (sets) => maxOf(sets.map((set) => set.durationSec)),
+      format: (v) => formatClock(v * 1000),
+      tick: (v) => formatClock(v * 1000),
+      time: true,
+    },
+  ],
+};
+
+function getTrendPoints(name, metric, workouts) {
+  const points = [];
+  for (const workout of workouts) {
+    const sets = workout.exercises.filter((exercise) => exercise.name === name).flatMap(getRealSets);
+    if (sets.length === 0) continue;
+    const value = metric.value(sets);
+    if (value === null || !Number.isFinite(value) || value <= 0) continue;
+    points.push({ t: workout.startedAt, value });
+  }
+  return points;
+}
+
+function renderSegments(container, labels, activeIndex, onSelect) {
+  container.innerHTML = "";
+  labels.forEach((label, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "segment";
+    button.textContent = label;
+    button.setAttribute("aria-pressed", String(index === activeIndex));
+    button.addEventListener("click", () => onSelect(index));
+    container.appendChild(button);
+  });
+}
+
+function renderTrend(range, workouts, periodKey) {
+  const namesInPeriod = new Set(workouts.flatMap((workout) => workout.exercises.filter((e) => getRealSets(e).length).map((e) => e.name)));
+  const names = getKnownExercisesByRecency().filter((name) => namesInPeriod.has(name));
+  if (!names.includes(statsView.exercise)) statsView.exercise = names[0] || null;
+
+  trendChips.innerHTML = "";
+  for (const name of names) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = name;
+    chip.setAttribute("aria-pressed", String(name === statsView.exercise));
+    chip.classList.toggle("selected", name === statsView.exercise);
+    chip.addEventListener("click", () => {
+      statsView.exercise = name;
+      renderStatistik();
+    });
+    trendChips.appendChild(chip);
+  }
+
+  const reset = (message) => {
+    trendMetricToggle.hidden = true;
+    trendHeadline.textContent = "";
+    trendChange.innerHTML = "";
+    trendChart.innerHTML = "";
+    trendEmpty.textContent = message;
+  };
+  if (!statsView.exercise) {
+    reset("Im gewählten Zeitraum gibt es noch keine Sätze. Trage in einem Workout Sätze ein, dann siehst du hier den Verlauf.");
+    return;
+  }
+
+  const type = getExerciseType(statsView.exercise);
+  const metrics = TREND_METRICS[type];
+  const metricIndex = Math.min(statsView.metricByType[type] || 0, metrics.length - 1);
+  const metric = metrics[metricIndex];
+  trendMetricToggle.hidden = metrics.length < 2;
+  renderSegments(trendMetricToggle, metrics.map((m) => m.label), metricIndex, (index) => {
+    statsView.metricByType[type] = index;
+    renderStatistik();
+  });
+
+  const points = getTrendPoints(statsView.exercise, metric, workouts);
+  if (points.length === 0) {
+    reset(`Für „${statsView.exercise}“ gibt es im Zeitraum keine Werte für ${metric.label}.`);
+    trendMetricToggle.hidden = metrics.length < 2;
+    return;
+  }
+  trendEmpty.textContent = "";
+  trendHeadline.textContent = `${metric.label}${metric.hint ? ` (${metric.hint})` : ""}: aktuell ${metric.format(points[points.length - 1].value)}`;
+
+  if (points.length < 2) {
+    trendChange.className = "trend-change is-neutral";
+    trendChange.textContent = "Ab zwei Trainings im Zeitraum siehst du hier den Trend.";
+  } else {
+    const first = points[0].value;
+    const last = points[points.length - 1].value;
+    const pct = ((last - first) / first) * 100;
+    const delta = Math.abs(pct) < 0.5 ? 0 : Math.sign(pct);
+    const improved = metric.lowerIsBetter ? delta < 0 : delta > 0;
+    const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+    let text = `${sign}${formatNumber(Math.abs(pct), 0)} % ${PERIODS[periodKey].trendLabel}`;
+    if (metric.lowerIsBetter && delta !== 0) text += improved ? " (schneller)" : " (langsamer)";
+    if (delta === 0) text = `Unverändert ${PERIODS[periodKey].trendLabel}`;
+    trendChange.dataset.baseClass = "trend-change";
+    setChange(trendChange, { delta, text, improved });
+  }
+
+  const domain = PERIODS[periodKey].days ? [range.start, Date.now()] : [points[0].t, points[points.length - 1].t];
+  renderLineChart(
+    trendChart,
+    points,
+    metric,
+    domain,
+    `Verlauf ${statsView.exercise}, ${metric.label}: ${points.length} Trainings, zuletzt ${metric.format(points[points.length - 1].value)}`
+  );
+}
+
+function getWeeklySeries(range, mode) {
+  let firstWeek = startOfIsoWeek(range.start);
+  const lastWeek = startOfIsoWeek(Date.now());
+  const maxWeeks = 104;
+  if ((lastWeek - firstWeek) / (7 * DAY_MS) >= maxWeeks) firstWeek = addDays(lastWeek, -7 * (maxWeeks - 1));
+  const weeks = [];
+  for (let week = firstWeek; week <= lastWeek; week = addDays(week, 7)) weeks.push({ start: week, value: 0 });
+  const indexByWeek = new Map(weeks.map((week, index) => [week.start, index]));
+  for (const workout of getWorkoutsBetween(range.start, range.end)) {
+    const index = indexByWeek.get(startOfIsoWeek(workout.startedAt));
+    if (index === undefined) continue;
+    const stats = computeWorkoutStats(workout);
+    weeks[index].value += mode === "volume" ? stats.volume : stats.durationMs / 60000;
+  }
+  return weeks;
+}
+
+function formatMinutes(minutes) {
+  return formatDurationLong(minutes * 60000);
+}
+
+function renderWeekly(range) {
+  const mode = statsView.weekly;
+  document.querySelectorAll("#weekly-toggle .segment").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.weekly === mode));
+  });
+  const weeks = getWeeklySeries(range, mode);
+  const total = sumOf(weeks.map((week) => week.value));
+  if (total <= 0) {
+    weeklyChart.innerHTML = "";
+    weeklyHeadline.textContent = "";
+    weeklyEmpty.textContent =
+      mode === "volume"
+        ? "Kein Kraft-Volumen im Zeitraum. Volumen entsteht aus Gewicht × Wiederholungen bei Kraftübungen."
+        : "Keine Trainingszeit im Zeitraum. Sie wird aus der Stoppuhr deiner Workouts berechnet.";
+    return;
+  }
+  weeklyEmpty.textContent = "";
+  const format = mode === "volume" ? (v) => `${formatNumber(Math.round(v), 0)} ${UNITS.weight}` : formatMinutes;
+  const tickOptions =
+    mode === "volume"
+      ? { tickFormat: (v) => formatNumber(v, 0) }
+      : { minutes: true, tickFormat: (v) => (v >= 60 ? `${formatNumber(v / 60, 1)} h` : `${v} min`) };
+  weeklyHeadline.textContent = `Ø ${format(total / weeks.length)} pro Woche`;
+  renderBarChart(weeklyChart, weeks, format, tickOptions, `${mode === "volume" ? "Trainingsvolumen" : "Trainingszeit"} pro Woche über ${weeks.length} Wochen`);
+}
+
+function computeStreaks() {
+  const weeks = [...new Set(state.workouts.map((workout) => startOfIsoWeek(workout.startedAt)))].sort((a, b) => a - b);
+  const weekSet = new Set(weeks);
+  let longest = 0;
+  let run = 0;
+  let previous = null;
+  for (const week of weeks) {
+    run = previous !== null && addDays(previous, 7) === week ? run + 1 : 1;
+    longest = Math.max(longest, run);
+    previous = week;
+  }
+  const thisWeek = startOfIsoWeek(Date.now());
+  let cursor = weekSet.has(thisWeek) ? thisWeek : addDays(thisWeek, -7);
+  let current = 0;
+  while (weekSet.has(cursor)) {
+    current += 1;
+    cursor = addDays(cursor, -7);
+  }
+  return { current, longest, thisWeekDone: weekSet.has(thisWeek) };
+}
+
+function renderStreak() {
+  const { current, longest, thisWeekDone } = computeStreaks();
+  document.getElementById("streak-value").textContent = String(current);
+  let sub;
+  if (current === 0) sub = "Starte diese Woche eine neue Serie.";
+  else if (!thisWeekDone) sub = "Trainiere diese Woche, um die Serie zu halten.";
+  else sub = "Diese Woche ist schon geschafft.";
+  if (longest > 0) sub += ` Längste Serie: ${longest} ${longest === 1 ? "Woche" : "Wochen"}.`;
+  document.getElementById("streak-sub").textContent = sub;
+}
+
+function renderCalendar(range) {
+  const today = startOfDay(Date.now());
+  const capStart = startOfIsoWeek(addDays(today, -7 * 52));
+  const visibleStart = Math.max(range.start, capStart);
+  const gridStart = startOfIsoWeek(visibleStart);
+  const workoutsPerDay = new Map();
+  for (const workout of getWorkoutsBetween(visibleStart, range.end)) {
+    const key = toDateStr(new Date(workout.startedAt));
+    workoutsPerDay.set(key, (workoutsPerDay.get(key) || 0) + 1);
+  }
+  const days = [];
+  for (let day = gridStart; day <= today; day = addDays(day, 1)) days.push(day);
+  const weekCount = Math.ceil(days.length / 7);
+
+  const mainWidth = document.querySelector(".app-main").clientWidth || 390;
+  const available = mainWidth - 40 - 50;
+  const labelWidth = 22;
+  let gap = 3;
+  let tile = Math.floor((available - labelWidth - gap * (weekCount - 1)) / weekCount);
+  if (tile < 10) {
+    gap = 2;
+    tile = Math.floor((available - labelWidth - gap * (weekCount - 1)) / weekCount);
+  }
+  tile = Math.max(4, Math.min(30, tile));
+  calendarEl.style.setProperty("--tile", `${tile}px`);
+  calendarEl.style.setProperty("--gap", `${gap}px`);
+
+  const trainedDays = days.filter((day) => day >= visibleStart && workoutsPerDay.has(toDateStr(new Date(day)))).length;
+  const daysInView = days.filter((day) => day >= visibleStart).length;
+
+  const labels = document.createElement("div");
+  labels.className = "calendar-labels";
+  labels.setAttribute("aria-hidden", "true");
+  ["Mo", "", "Mi", "", "Fr", "", ""].forEach((text) => {
+    const span = document.createElement("span");
+    span.textContent = text;
+    labels.appendChild(span);
+  });
+
+  const grid = document.createElement("div");
+  grid.className = "calendar-grid";
+  grid.setAttribute("role", "img");
+  grid.setAttribute("aria-label", `${trainedDays} Trainingstage von ${daysInView} Tagen`);
+  for (const day of days) {
+    const cell = document.createElement("span");
+    const count = workoutsPerDay.get(toDateStr(new Date(day))) || 0;
+    cell.className = "cal-day";
+    if (day < visibleStart) cell.classList.add("is-outside");
+    else if (count > 0) cell.classList.add("is-trained");
+    if (day === today) cell.classList.add("is-today");
+    cell.title = `${formatLongDate(day)}: ${count ? `${count} ${count === 1 ? "Workout" : "Workouts"}` : "kein Training"}`;
+    grid.appendChild(cell);
+  }
+  calendarEl.innerHTML = "";
+  calendarEl.append(labels, grid);
+  const capped = range.start < capStart;
+  calendarCaption.textContent = `${trainedDays} Trainingstage von ${daysInView} Tagen${capped ? " · Kalender zeigt die letzten 12 Monate" : ""}`;
+}
+
+const BEST_DEFS = {
+  strength: [
+    RECORD_DEFS.strength[0],
+    { label: "Meiste Wiederholungen", value: (set) => set.reps || null, format: (v) => `${v} Wdh.` },
+    RECORD_DEFS.strength[1],
+  ],
+  bodyweight: RECORD_DEFS.bodyweight,
+  endurance: RECORD_DEFS.endurance,
+  timed: RECORD_DEFS.timed,
+};
+
+function findBest(name, def) {
+  let best = null;
+  for (const workout of state.workouts) {
+    for (const exercise of workout.exercises) {
+      if (exercise.name !== name) continue;
+      for (const set of getRealSets(exercise)) {
+        const value = def.value(set);
+        if (value === null || !Number.isFinite(value)) continue;
+        if (!best || (def.lowerIsBetter ? value < best.value : value > best.value)) best = { value, at: workout.startedAt };
+      }
+    }
+  }
+  return best;
+}
+
+function renderBests() {
+  bestsList.innerHTML = "";
+  let count = 0;
+  for (const name of getKnownExercisesByRecency()) {
+    const type = getExerciseType(name);
+    const rows = BEST_DEFS[type].map((def) => ({ def, best: findBest(name, def) })).filter((row) => row.best);
+    if (rows.length === 0) continue;
+    count += 1;
+    const card = document.createElement("article");
+    card.className = "best-card";
+    const head = document.createElement("header");
+    head.className = "best-card-head";
+    const title = document.createElement("h3");
+    title.textContent = name;
+    const typeLabel = document.createElement("span");
+    typeLabel.textContent = EXERCISE_TYPES[type].label;
+    head.append(title, typeLabel);
+    const list = document.createElement("dl");
+    list.className = "best-rows";
+    for (const { def, best } of rows) {
+      const term = document.createElement("dt");
+      term.textContent = def.label;
+      const detail = document.createElement("dd");
+      const value = document.createElement("strong");
+      value.textContent = def.format(best.value);
+      const date = document.createElement("span");
+      date.textContent = formatLongDate(best.at);
+      detail.append(value, date);
+      list.append(term, detail);
+    }
+    card.append(head, list);
+    bestsList.appendChild(card);
+  }
+  bestsEmpty.hidden = count > 0;
+}
+
+function renderStatistik() {
+  const hasData = state.workouts.length > 0;
+  statsEmpty.hidden = hasData;
+  statsContent.hidden = !hasData;
+  const periodKey = getPeriodKey();
+  document.querySelectorAll("#period-switch .segment").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.period === periodKey));
+  });
+  if (!hasData) return;
+  const range = getPeriodRange(periodKey);
+  const workouts = getWorkoutsBetween(range.start, range.end);
+  periodEmpty.textContent = workouts.length
+    ? ""
+    : "Im gewählten Zeitraum gibt es keine Workouts. Wähle einen längeren Zeitraum oder starte ein Training.";
+  renderKpis(range, workouts, periodKey);
+  renderTrend(range, workouts, periodKey);
+  renderWeekly(range);
+  renderStreak();
+  renderCalendar(range);
+  renderBests();
+}
+
+document.querySelectorAll("#period-switch .segment").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.settings.statPeriod = button.dataset.period;
+    saveState();
+    renderStatistik();
+  });
+});
+document.querySelectorAll("#weekly-toggle .segment").forEach((button) => {
+  button.addEventListener("click", () => {
+    statsView.weekly = button.dataset.weekly;
+    renderStatistik();
+  });
+});
+document.getElementById("stats-start-btn").addEventListener("click", () => switchTab("training"));
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderStatistik, 150);
+});
+
 // ---------- Wake Lock ----------
 
 const wakeLockSupported = "wakeLock" in navigator;
@@ -1802,7 +2196,6 @@ function renderAll() {
   renderTemplates();
   renderHistory();
   if (detailDialog.open) renderDetail();
-  renderWeeklyOverview();
   renderStatistik();
 }
 

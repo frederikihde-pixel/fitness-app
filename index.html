@@ -89,26 +89,64 @@
       </div>
     </section>
 
-    <section id="uebersicht" class="tab-content">
-      <h2>Pro Woche</h2>
-      <ul id="weekly-overview"></ul>
-      <p id="empty-overview" class="empty-msg">Noch keine Daten für die Übersicht.</p>
-    </section>
-
     <section id="statistik" class="tab-content">
-      <h2>Verlauf</h2>
-      <div id="stat-chips" class="chip-row"></div>
-      <div class="card chart-card">
-        <div id="trend-chart-container"></div>
-        <p id="chart-empty" class="empty-msg">Für diese Übung gibt es noch keinen Verlauf.</p>
+      <div id="period-switch" class="segmented" role="group" aria-label="Zeitraum">
+        <button type="button" class="segment" data-period="4w">4 Wochen</button>
+        <button type="button" class="segment" data-period="3m">3 Monate</button>
+        <button type="button" class="segment" data-period="1y">1 Jahr</button>
+        <button type="button" class="segment" data-period="all">Alles</button>
       </div>
 
-      <h2>Bestwerte</h2>
-      <ul id="best-list"></ul>
-      <p id="empty-bests" class="empty-msg">Noch keine Bestwerte vorhanden.</p>
+      <div id="stats-empty" class="empty-state" hidden>
+        <p class="empty-title">Noch keine Statistik</p>
+        <p>Sobald du dein erstes Workout beendet hast, siehst du hier deinen Fortschritt, deine Bestwerte und deine Trainingstage.</p>
+        <button type="button" id="stats-start-btn" class="btn btn-primary empty-action">Zum Training</button>
+      </div>
 
-      <h2>Diese Woche</h2>
-      <div class="card compare-card" id="week-compare"></div>
+      <div id="stats-content">
+        <p id="period-empty" class="period-empty"></p>
+        <div id="kpi-grid" class="kpi-grid"></div>
+
+        <h2>Verlauf pro Übung</h2>
+        <div class="card chart-card">
+          <div id="trend-exercise-chips" class="chip-row chip-row-scroll"></div>
+          <div id="trend-metric-toggle" class="segmented segmented-small" role="group" aria-label="Messgröße"></div>
+          <div class="chart-head">
+            <p id="trend-headline" class="chart-headline"></p>
+            <p id="trend-change" class="trend-change"></p>
+          </div>
+          <div id="trend-chart" class="chart-wrap"></div>
+          <p id="trend-empty" class="chart-empty"></p>
+        </div>
+
+        <h2>Pro Woche</h2>
+        <div class="card chart-card">
+          <div id="weekly-toggle" class="segmented segmented-small" role="group" aria-label="Wert pro Woche">
+            <button type="button" class="segment" data-weekly="volume">Volumen</button>
+            <button type="button" class="segment" data-weekly="time">Trainingszeit</button>
+          </div>
+          <p id="weekly-headline" class="chart-headline"></p>
+          <div id="weekly-chart" class="chart-wrap"></div>
+          <p id="weekly-empty" class="chart-empty"></p>
+        </div>
+
+        <h2>Trainingstage</h2>
+        <div class="card calendar-card">
+          <div class="streak">
+            <span id="streak-value" class="streak-value">0</span>
+            <div class="streak-text">
+              <span class="streak-label">Wochen in Folge mit Training</span>
+              <span id="streak-sub" class="streak-sub"></span>
+            </div>
+          </div>
+          <div id="calendar" class="calendar"></div>
+          <p id="calendar-caption" class="muted-small"></p>
+        </div>
+
+        <h2>Bestwerte (gesamt)</h2>
+        <div id="bests-list" class="bests-list"></div>
+        <p id="bests-empty" class="muted-small">Noch keine Bestwerte – trage Sätze ein, dann erscheinen sie hier.</p>
+      </div>
     </section>
   </main>
 
@@ -120,10 +158,6 @@
     <button type="button" class="nav-btn" data-tab="liste">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
       <span>Verlauf</span>
-    </button>
-    <button type="button" class="nav-btn" data-tab="uebersicht">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19V10M12 19V5M19 19v-7"/></svg>
-      <span>Übersicht</span>
     </button>
     <button type="button" class="nav-btn" data-tab="statistik">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16l4.5-6 4 4L19 6"/><circle cx="19" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg>
