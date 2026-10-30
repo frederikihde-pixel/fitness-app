@@ -242,8 +242,6 @@ function loadEntries() {
   return entries;
 }
 
-const entryList = document.getElementById("entry-list");
-const emptyList = document.getElementById("empty-list");
 const weeklyOverview = document.getElementById("weekly-overview");
 const emptyOverview = document.getElementById("empty-overview");
 
@@ -311,14 +309,6 @@ function computeWeeklyTotals(entries) {
   return totals;
 }
 
-function formatEntryDetails(entry) {
-  const parts = [];
-  if (entry.reps) parts.push(`${entry.reps} Wdh.`);
-  if (entry.distance) parts.push(`${entry.distance} km`);
-  if (entry.duration) parts.push(`${entry.duration} min`);
-  return parts.join(" · ") || "Keine weiteren Angaben";
-}
-
 // Returns the most recent entry per exercise, sorted by most recently used first.
 function getExerciseRecency(entries) {
   const latestByExercise = new Map();
@@ -329,57 +319,6 @@ function getExerciseRecency(entries) {
     }
   }
   return [...latestByExercise.values()].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-}
-
-function renderList() {
-  const entries = loadEntries();
-  entryList.innerHTML = "";
-
-  if (entries.length === 0) {
-    emptyList.style.display = "block";
-    return;
-  }
-  emptyList.style.display = "none";
-
-  const sorted = [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-
-  for (const entry of sorted) {
-    const li = document.createElement("li");
-
-    const main = document.createElement("div");
-    main.className = "entry-main";
-
-    const exerciseEl = document.createElement("span");
-    exerciseEl.className = "entry-exercise";
-    exerciseEl.textContent = entry.exercise;
-
-    const detailsEl = document.createElement("span");
-    detailsEl.className = "entry-details";
-    detailsEl.textContent = formatEntryDetails(entry);
-
-    const dateEl = document.createElement("span");
-    dateEl.className = "entry-date";
-    dateEl.textContent = new Date(entry.date + "T00:00:00").toLocaleDateString("de-DE");
-
-    main.append(exerciseEl, detailsEl, dateEl);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "delete-btn";
-    deleteBtn.setAttribute("aria-label", "Eintrag löschen");
-    deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-12"/></svg>';
-    deleteBtn.addEventListener("click", () => deleteWorkout(entry.workoutId));
-
-    li.append(main, deleteBtn);
-    entryList.appendChild(li);
-  }
-}
-
-function deleteWorkout(workoutId) {
-  state.workouts = state.workouts.filter((workout) => workout.id !== workoutId);
-  saveState();
-  renderList();
-  renderWeeklyOverview();
-  renderStatistik();
 }
 
 function renderWeeklyOverview() {
@@ -729,12 +668,12 @@ function getElapsedMs(workout, now = Date.now()) {
   return Math.max(0, end - workout.startedAt - (workout.pausedMs || 0));
 }
 
-function startWorkout() {
+function startWorkout(template = null) {
   const now = Date.now();
   const name = workoutNameInput.value.trim();
-  state.activeWorkout = {
+  const workout = {
     id: createId("w"),
-    name: name || formatWorkoutDefaultName(now),
+    name: name || template?.name || formatWorkoutDefaultName(now),
     startedAt: now,
     pausedAt: null,
     pausedMs: 0,
@@ -742,10 +681,18 @@ function startWorkout() {
     restEndsAt: null,
     restTotalSec: null,
   };
+  for (const item of template?.exercises || []) {
+    const exercise = { id: createId("e"), name: item.name, sets: [] };
+    for (let index = 0; index < item.setCount; index += 1) {
+      exercise.sets.push({ id: createId("s"), ...getPrefillValues(workout, exercise, index), done: false, planned: true });
+    }
+    workout.exercises.push(exercise);
+  }
+  state.activeWorkout = workout;
   workoutNameInput.value = "";
   saveState();
   workoutViewOpen = true;
-  renderTraining();
+  renderAll();
   syncWakeLock();
   window.scrollTo(0, 0);
 }
@@ -796,11 +743,11 @@ function finalizeActiveWorkout() {
 async function finishWorkout() {
   const ok = await confirmDialog("Workout jetzt beenden und speichern?", { confirmLabel: "Beenden" });
   if (!ok || !state.activeWorkout) return;
-  finalizeActiveWorkout();
+  const finished = finalizeActiveWorkout();
   workoutViewOpen = false;
   renderAll();
   syncWakeLock();
-  showToast("Workout gespeichert");
+  openSummary(finished);
 }
 
 async function discardWorkout() {
@@ -919,7 +866,7 @@ function summarizeSets(sets, type) {
     if (allSame("weight") && allSame("reps")) {
       return `${sets.length} × ${sets[0].reps} mit ${formatNumber(sets[0].weight)} ${UNITS.weight}`;
     }
-    return sets.map((set) => `${set.reps} × ${formatNumber(set.weight)} ${UNITS.weight}`).join(", ");
+    return sets.map((set) => formatSet(set, type)).join(", ");
   }
   if (type === "bodyweight" && sets.every((set) => set.reps)) {
     return allSame("reps") ? `${sets.length} × ${sets[0].reps} Wdh.` : `${sets.map((set) => set.reps).join(", ")} Wdh.`;
@@ -1106,10 +1053,20 @@ async function removeExercise(ctx, exerciseId) {
   persistAndRender();
 }
 
+function isSetComplete(set, type) {
+  if (type === "strength" || type === "bodyweight") return set.reps > 0;
+  if (type === "endurance") return set.distance > 0 || set.durationSec > 0;
+  return set.durationSec > 0;
+}
+
 function toggleSetDone(exerciseId, setId) {
   const workout = state.activeWorkout;
   const set = workout?.exercises.find((item) => item.id === exerciseId)?.sets.find((item) => item.id === setId);
   if (!set) return;
+  if (set.planned && !isSetComplete(set, getExerciseType(workout.exercises.find((item) => item.id === exerciseId).name))) {
+    openSetDialog({ kind: "active" }, exerciseId, setId);
+    return;
+  }
   const nowDone = set.planned ? true : !set.done;
   set.planned = false;
   set.done = nowDone;
@@ -1443,6 +1400,340 @@ function renderWorkoutExercises() {
 
 document.getElementById("add-exercise-btn").addEventListener("click", () => openExerciseDialog({ kind: "active" }));
 
+// ---------- Workout statistics and personal records ----------
+
+function computeWorkoutStats(workout) {
+  let setCount = 0;
+  let volume = 0;
+  let exerciseCount = 0;
+  for (const exercise of workout.exercises) {
+    const sets = getRealSets(exercise);
+    if (sets.length > 0) exerciseCount += 1;
+    const type = getExerciseType(exercise.name);
+    for (const set of sets) {
+      setCount += 1;
+      if (type === "strength" && set.weight > 0 && set.reps > 0) volume += set.weight * set.reps;
+    }
+  }
+  return { durationMs: getElapsedMs(workout), exerciseCount, setCount, volume };
+}
+
+function estimateOneRepMax(weight, reps) {
+  if (!(weight > 0) || !(reps > 0)) return null;
+  return reps === 1 ? weight : weight * (1 + reps / 30);
+}
+
+const RECORD_DEFS = {
+  strength: [
+    { label: "Schwerster Satz", value: (set) => (set.reps > 0 ? set.weight || null : null), format: (v) => `${formatNumber(v)} ${UNITS.weight}` },
+    { label: "Bestes geschätztes Maximum", value: (set) => estimateOneRepMax(set.weight, set.reps), format: (v) => `${formatNumber(v, 1)} ${UNITS.weight}` },
+  ],
+  bodyweight: [{ label: "Meiste Wiederholungen", value: (set) => set.reps || null, format: (v) => `${v} Wdh.` }],
+  endurance: [
+    { label: "Längste Distanz", value: (set) => set.distance || null, format: (v) => `${formatNumber(v)} ${UNITS.distance}` },
+    { label: "Bestes Tempo", value: (set) => getPaceSecPerKm(set), format: (v) => formatPace(v), lowerIsBetter: true },
+  ],
+  timed: [{ label: "Längste Dauer", value: (set) => set.durationSec || null, format: (v) => formatClock(v * 1000) }],
+};
+
+function bestRecordValue(sets, def) {
+  let best = null;
+  for (const set of sets) {
+    const value = def.value(set);
+    if (value === null || !Number.isFinite(value)) continue;
+    if (best === null || (def.lowerIsBetter ? value < best : value > best)) best = value;
+  }
+  return best;
+}
+
+// Records improved by this workout compared to all saved workouts that started before it.
+function findNewRecords(workout) {
+  const records = [];
+  for (const exercise of workout.exercises) {
+    const sets = getRealSets(exercise);
+    if (sets.length === 0) continue;
+    const type = getExerciseType(exercise.name);
+    const earlierSets = state.workouts
+      .filter((other) => other.id !== workout.id && other.startedAt < workout.startedAt)
+      .flatMap((other) => other.exercises.filter((item) => item.name === exercise.name).flatMap(getRealSets));
+    if (earlierSets.length === 0) continue;
+    for (const def of RECORD_DEFS[type] || []) {
+      const current = bestRecordValue(sets, def);
+      const previous = bestRecordValue(earlierSets, def);
+      if (current === null || previous === null) continue;
+      const improved = def.lowerIsBetter ? current < previous - 0.5 : current > previous + 1e-9;
+      if (improved) {
+        records.push({ exercise: exercise.name, label: def.label, value: def.format(current), previous: def.format(previous) });
+      }
+    }
+  }
+  return records;
+}
+
+function renderStatGrid(container, workout) {
+  const stats = computeWorkoutStats(workout);
+  const tiles = [
+    ["Dauer", formatDurationLong(stats.durationMs)],
+    ["Übungen", String(stats.exerciseCount)],
+    ["Sätze", String(stats.setCount)],
+    ["Volumen", `${formatNumber(Math.round(stats.volume), 0)} ${UNITS.weight}`],
+  ];
+  container.innerHTML = "";
+  for (const [label, value] of tiles) {
+    const tile = document.createElement("div");
+    tile.className = "stat-tile";
+    const valueEl = document.createElement("span");
+    valueEl.className = "stat-value";
+    valueEl.textContent = value;
+    const labelEl = document.createElement("span");
+    labelEl.className = "stat-label";
+    labelEl.textContent = label;
+    tile.append(valueEl, labelEl);
+    container.appendChild(tile);
+  }
+}
+
+// ---------- Summary dialog ----------
+
+const ARROW_UP_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+
+const summaryDialog = document.getElementById("summary-dialog");
+const summaryTemplateBtn = document.getElementById("summary-template-btn");
+let summaryWorkoutId = null;
+
+function openSummary(workout) {
+  summaryWorkoutId = workout.id;
+  document.getElementById("summary-title").textContent = workout.name;
+  renderStatGrid(document.getElementById("summary-stats"), workout);
+
+  const records = findNewRecords(workout);
+  const prList = document.getElementById("summary-prs");
+  prList.innerHTML = "";
+  for (const record of records) {
+    const item = document.createElement("li");
+    item.className = "pr-item";
+    const icon = document.createElement("span");
+    icon.className = "pr-icon";
+    icon.innerHTML = ARROW_UP_ICON;
+    const text = document.createElement("div");
+    text.className = "pr-text";
+    const title = document.createElement("strong");
+    title.textContent = `${record.exercise}: ${record.value}`;
+    const sub = document.createElement("span");
+    sub.textContent = `Neuer Bestwert – ${record.label} (vorher ${record.previous})`;
+    text.append(title, sub);
+    item.append(icon, text);
+    prList.appendChild(item);
+  }
+  document.getElementById("summary-prs-section").hidden = records.length === 0;
+  document.getElementById("summary-no-prs").textContent =
+    records.length === 0 ? "Diesmal keine neuen Bestwerte – Hauptsache dabeigeblieben." : "";
+
+  summaryTemplateBtn.disabled = workout.exercises.length === 0;
+  summaryTemplateBtn.textContent = "Als Vorlage speichern";
+  summaryDialog.showModal();
+}
+
+summaryTemplateBtn.addEventListener("click", () => {
+  const workout = state.workouts.find((item) => item.id === summaryWorkoutId);
+  if (workout) openTemplateDialog(workout);
+});
+document.getElementById("summary-done-btn").addEventListener("click", () => summaryDialog.close());
+
+// ---------- Templates ----------
+
+const templateDialog = document.getElementById("template-dialog");
+const templateForm = document.getElementById("template-form");
+const templateNameInput = document.getElementById("template-name");
+const templateError = document.getElementById("template-error");
+let templateSourceId = null;
+
+function openTemplateDialog(workout) {
+  templateSourceId = workout.id;
+  templateNameInput.value = workout.name;
+  templateError.textContent = "";
+  templateDialog.showModal();
+  templateNameInput.select();
+}
+
+templateForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const workout = state.workouts.find((item) => item.id === templateSourceId);
+  const name = templateNameInput.value.trim();
+  if (!name) {
+    templateError.textContent = "Bitte gib der Vorlage einen Namen.";
+    return;
+  }
+  if (!workout || workout.exercises.length === 0) {
+    templateError.textContent = "Dieses Workout enthält keine Übungen.";
+    return;
+  }
+  const template = {
+    id: createId("t"),
+    name,
+    createdAt: Date.now(),
+    exercises: workout.exercises.map((exercise) => ({ name: exercise.name, setCount: Math.max(1, getRealSets(exercise).length) })),
+  };
+  const existingIndex = state.templates.findIndex((item) => item.name.toLowerCase() === name.toLowerCase());
+  if (existingIndex >= 0) state.templates[existingIndex] = { ...template, id: state.templates[existingIndex].id };
+  else state.templates.push(template);
+  templateDialog.close();
+  if (workout.id === summaryWorkoutId && summaryDialog.open) {
+    summaryTemplateBtn.disabled = true;
+    summaryTemplateBtn.textContent = "Als Vorlage gespeichert";
+  }
+  persistAndRender();
+  showToast(existingIndex >= 0 ? `Vorlage „${name}“ aktualisiert` : `Vorlage „${name}“ gespeichert`);
+});
+
+document.getElementById("template-cancel").addEventListener("click", () => templateDialog.close());
+
+const templateList = document.getElementById("template-list");
+const templatesEmpty = document.getElementById("templates-empty");
+const templatesSection = document.getElementById("templates-section");
+
+function renderTemplates() {
+  templatesSection.hidden = Boolean(state.activeWorkout);
+  templateList.innerHTML = "";
+  templatesEmpty.hidden = state.templates.length > 0;
+  for (const template of state.templates) {
+    const item = document.createElement("li");
+    item.className = "template-item";
+    const text = document.createElement("div");
+    text.className = "template-text";
+    const name = document.createElement("strong");
+    name.textContent = template.name;
+    const exercises = document.createElement("span");
+    const names = template.exercises.map((exercise) => exercise.name);
+    exercises.textContent = names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
+    text.append(name, exercises);
+
+    const startBtn = document.createElement("button");
+    startBtn.type = "button";
+    startBtn.className = "btn btn-primary template-start";
+    startBtn.textContent = "Start";
+    startBtn.setAttribute("aria-label", `Workout aus Vorlage ${template.name} starten`);
+    startBtn.addEventListener("click", () => startWorkout(template));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "icon-btn icon-btn-plain";
+    deleteBtn.innerHTML = TRASH_ICON;
+    deleteBtn.setAttribute("aria-label", `Vorlage ${template.name} löschen`);
+    deleteBtn.addEventListener("click", async () => {
+      const ok = await confirmDialog(`Vorlage „${template.name}“ löschen? Deine Workouts bleiben erhalten.`, {
+        confirmLabel: "Löschen",
+        danger: true,
+      });
+      if (!ok) return;
+      state.templates = state.templates.filter((item) => item.id !== template.id);
+      persistAndRender();
+    });
+
+    item.append(text, startBtn, deleteBtn);
+    templateList.appendChild(item);
+  }
+}
+
+// ---------- History list and detail ----------
+
+const workoutListEl = document.getElementById("workout-list");
+const historyEmpty = document.getElementById("history-empty");
+
+function formatWorkoutMeta(workout) {
+  const date = new Date(workout.startedAt);
+  const day = date.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+  if (workout.migrated) return `${day} · übernommen aus alten Einträgen`;
+  const time = date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  return `${day}, ${time} Uhr · ${formatDurationLong(getElapsedMs(workout))}`;
+}
+
+function renderHistory() {
+  const workouts = [...state.workouts].sort((a, b) => b.startedAt - a.startedAt);
+  workoutListEl.innerHTML = "";
+  historyEmpty.hidden = workouts.length > 0;
+  for (const workout of workouts) {
+    const stats = computeWorkoutStats(workout);
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "workout-item";
+    const name = document.createElement("span");
+    name.className = "workout-item-name";
+    name.textContent = workout.name;
+    const meta = document.createElement("span");
+    meta.className = "workout-item-meta";
+    meta.textContent = formatWorkoutMeta(workout);
+    const summary = document.createElement("span");
+    summary.className = "workout-item-summary";
+    const parts = [
+      `${stats.exerciseCount} ${stats.exerciseCount === 1 ? "Übung" : "Übungen"}`,
+      `${stats.setCount} ${stats.setCount === 1 ? "Satz" : "Sätze"}`,
+    ];
+    if (stats.volume > 0) parts.push(`${formatNumber(Math.round(stats.volume), 0)} ${UNITS.weight}`);
+    summary.textContent = parts.join(" · ");
+    button.append(name, meta, summary);
+    button.addEventListener("click", () => openDetail(workout.id));
+    item.appendChild(button);
+    workoutListEl.appendChild(item);
+  }
+}
+
+const detailDialog = document.getElementById("detail-dialog");
+const detailNameInput = document.getElementById("detail-name");
+let detailWorkoutId = null;
+
+function openDetail(workoutId) {
+  detailWorkoutId = workoutId;
+  renderDetail();
+  detailDialog.showModal();
+  detailDialog.scrollTop = 0;
+}
+
+function renderDetail() {
+  const workout = state.workouts.find((item) => item.id === detailWorkoutId);
+  if (!workout) {
+    if (detailDialog.open) detailDialog.close();
+    return;
+  }
+  if (document.activeElement !== detailNameInput) detailNameInput.value = workout.name;
+  document.getElementById("detail-meta").textContent = formatWorkoutMeta(workout);
+  renderStatGrid(document.getElementById("detail-stats"), workout);
+  renderExerciseList(document.getElementById("detail-exercises"), workout, { kind: "finished", workoutId: workout.id });
+  document.getElementById("detail-empty").hidden = workout.exercises.length > 0;
+  document.getElementById("detail-template").disabled = workout.exercises.length === 0;
+}
+
+detailNameInput.addEventListener("change", () => {
+  const workout = state.workouts.find((item) => item.id === detailWorkoutId);
+  if (!workout) return;
+  workout.name = detailNameInput.value.trim() || formatWorkoutDefaultName(workout.startedAt);
+  detailNameInput.value = workout.name;
+  persistAndRender();
+});
+
+document.getElementById("detail-close").addEventListener("click", () => detailDialog.close());
+document.getElementById("detail-add-exercise").addEventListener("click", () =>
+  openExerciseDialog({ kind: "finished", workoutId: detailWorkoutId })
+);
+document.getElementById("detail-template").addEventListener("click", () => {
+  const workout = state.workouts.find((item) => item.id === detailWorkoutId);
+  if (workout) openTemplateDialog(workout);
+});
+document.getElementById("detail-delete").addEventListener("click", async () => {
+  const workout = state.workouts.find((item) => item.id === detailWorkoutId);
+  if (!workout) return;
+  const ok = await confirmDialog(`Workout „${workout.name}“ endgültig löschen?`, { confirmLabel: "Löschen", danger: true });
+  if (!ok) return;
+  state.workouts = state.workouts.filter((item) => item.id !== workout.id);
+  detailDialog.close();
+  persistAndRender();
+  showToast("Workout gelöscht");
+});
+
+document.getElementById("history-start-btn").addEventListener("click", () => switchTab("training"));
+
 // ---------- Wake Lock ----------
 
 const wakeLockSupported = "wakeLock" in navigator;
@@ -1508,7 +1799,9 @@ function switchTab(tab) {
 
 function renderAll() {
   renderTraining();
-  renderList();
+  renderTemplates();
+  renderHistory();
+  if (detailDialog.open) renderDetail();
   renderWeeklyOverview();
   renderStatistik();
 }
@@ -1522,7 +1815,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-document.getElementById("start-workout-btn").addEventListener("click", startWorkout);
+document.getElementById("start-workout-btn").addEventListener("click", () => startWorkout());
 document.getElementById("open-workout-btn").addEventListener("click", () => {
   workoutViewOpen = true;
   renderTraining();

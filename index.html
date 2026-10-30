@@ -31,6 +31,12 @@
           </div>
           <button type="button" id="start-workout-btn" class="btn btn-primary btn-large">Workout starten</button>
         </div>
+
+        <div id="templates-section">
+          <h2>Aus Vorlage starten</h2>
+          <ul id="template-list" class="template-list"></ul>
+          <p id="templates-empty" class="muted-small templates-empty">Noch keine Vorlagen. Nach einem Workout kannst du es in der Zusammenfassung oder im Verlauf als Vorlage speichern.</p>
+        </div>
       </div>
 
       <div id="workout-screen" hidden>
@@ -74,9 +80,13 @@
     </section>
 
     <section id="liste" class="tab-content">
-      <h2>Alle Einträge</h2>
-      <ul id="entry-list"></ul>
-      <p id="empty-list" class="empty-msg">Noch keine Einträge vorhanden.</p>
+      <h2>Workouts</h2>
+      <ul id="workout-list" class="workout-list"></ul>
+      <div id="history-empty" class="empty-state">
+        <p class="empty-title">Noch keine Workouts</p>
+        <p>Starte dein erstes Training im Tab „Training“. Danach findest du es hier mit allen Details.</p>
+        <button type="button" id="history-start-btn" class="btn btn-primary empty-action">Zum Training</button>
+      </div>
     </section>
 
     <section id="uebersicht" class="tab-content">
@@ -205,6 +215,61 @@
       </div>
       <button type="button" id="set-delete" class="btn btn-ghost-danger btn-block">Satz löschen</button>
     </form>
+  </dialog>
+
+  <dialog id="summary-dialog" class="sheet" aria-labelledby="summary-title">
+    <div class="sheet-body">
+      <div>
+        <p class="card-kicker">Workout beendet</p>
+        <h2 id="summary-title" class="sheet-title"></h2>
+      </div>
+      <div id="summary-stats" class="stat-grid"></div>
+      <div id="summary-prs-section" class="field-group">
+        <p class="field-caption">Neue Bestwerte</p>
+        <ul id="summary-prs" class="pr-list"></ul>
+      </div>
+      <p id="summary-no-prs" class="muted-small"></p>
+      <button type="button" id="summary-template-btn" class="btn btn-secondary btn-block">Als Vorlage speichern</button>
+      <button type="button" id="summary-done-btn" class="btn btn-primary btn-block">Fertig</button>
+    </div>
+  </dialog>
+
+  <dialog id="template-dialog" class="sheet" aria-labelledby="template-dialog-title">
+    <form id="template-form" class="sheet-body" novalidate>
+      <h2 id="template-dialog-title" class="sheet-title">Als Vorlage speichern</h2>
+      <div class="field-group">
+        <label for="template-name">Name der Vorlage</label>
+        <input type="text" id="template-name" autocomplete="off" maxlength="60">
+      </div>
+      <p class="muted-small">Übernommen werden die Übungen und die Anzahl der Sätze. Beim Start sind die Sätze leer und mit deinen letzten Werten vorbelegt.</p>
+      <p id="template-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="template-cancel" class="btn btn-secondary">Abbrechen</button>
+        <button type="submit" class="btn btn-primary">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" class="sheet sheet-full" aria-labelledby="detail-kicker">
+    <div class="sheet-body">
+      <div class="detail-head">
+        <p id="detail-kicker" class="card-kicker">Workout-Details</p>
+        <button type="button" id="detail-close" class="icon-btn" aria-label="Details schließen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="field-group">
+        <label for="detail-name">Name</label>
+        <input type="text" id="detail-name" autocomplete="off" maxlength="60">
+      </div>
+      <p id="detail-meta" class="muted-small"></p>
+      <div id="detail-stats" class="stat-grid"></div>
+      <div id="detail-exercises" class="exercise-list"></div>
+      <p id="detail-empty" class="muted-small">Dieses Workout enthält keine Sätze.</p>
+      <button type="button" id="detail-add-exercise" class="btn btn-secondary btn-block btn-dashed">+ Übung hinzufügen</button>
+      <button type="button" id="detail-template" class="btn btn-secondary btn-block">Vorlage aus diesem Workout</button>
+      <button type="button" id="detail-delete" class="btn btn-ghost-danger btn-block">Workout löschen</button>
+    </div>
   </dialog>
 
   <div id="rest-timer" class="rest-timer" role="timer" aria-label="Pausen-Timer" hidden>
