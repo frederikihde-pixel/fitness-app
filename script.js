@@ -1,6 +1,6 @@
 const DATA_KEY = "fitness-tracker-data";
 const LEGACY_KEY = "fitness-tracker-entries";
-const DATA_VERSION = 2;
+const DATA_VERSION = 3;
 
 const UNITS = { weight: "kg", distance: "km" };
 
@@ -14,6 +14,7 @@ const EXERCISE_TYPES = {
 // Each entry migrates data from version N to N + 1.
 const MIGRATIONS = {
   1: migrateV1toV2,
+  2: migrateV2toV3,
 };
 
 const appBanner = document.getElementById("app-banner");
@@ -66,9 +67,9 @@ function emptyState() {
     version: DATA_VERSION,
     exercises: {},
     workouts: [],
-    templates: [],
+    routines: [],
     activeWorkout: null,
-    settings: { restSeconds: 90, statPeriod: "3m" },
+    settings: { restSeconds: 90, statPeriod: "3m", weeklyGoal: 3 },
   };
 }
 
@@ -105,7 +106,14 @@ function migrateV1toV2(data) {
   const legacy = (Array.isArray(data.entries) ? data.entries : []).filter(
     (entry) => entry && typeof entry.exercise === "string" && entry.exercise.trim() && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)
   );
-  const next = emptyState();
+  const next = {
+    version: 2,
+    exercises: {},
+    workouts: [],
+    templates: [],
+    activeWorkout: null,
+    settings: { restSeconds: 90, statPeriod: "3m" },
+  };
   const types = inferLegacyTypes(legacy);
   for (const [name, type] of Object.entries(types)) {
     next.exercises[name] = { type };
@@ -143,6 +151,70 @@ function migrateV1toV2(data) {
 
   next.workouts.sort((a, b) => a.startedAt - b.startedAt);
   return next;
+}
+
+function lastSetsFromWorkouts(workouts, name) {
+  const sorted = [...workouts].sort((a, b) => b.startedAt - a.startedAt);
+  for (const workout of sorted) {
+    const exercise = (workout.exercises || []).find((item) => item.name === name);
+    const sets = exercise ? exercise.sets.filter((set) => !set.planned) : [];
+    if (sets.length > 0) return sets;
+  }
+  return [];
+}
+
+// v3: templates become "Meine Workouts" (routines) with planned set values;
+// workouts get a notes field and a link to the routine they were started from.
+function migrateV2toV3(data) {
+  const workouts = (data.workouts || []).map((workout) => ({
+    ...workout,
+    notes: workout.notes || "",
+    routineId: workout.routineId || null,
+  }));
+  const routines = (data.templates || []).map((template, index) => {
+    const id = template.id || `r-migrated-${index}`;
+    return {
+      id,
+      name: template.name,
+      notes: "",
+      createdAt: template.createdAt || Date.now(),
+      exercises: (template.exercises || []).map((item, exerciseIndex) => {
+        const previous = lastSetsFromWorkouts(workouts, item.name);
+        const count = Math.max(1, item.setCount || previous.length || 1);
+        return {
+          id: `${id}-e${exerciseIndex}`,
+          name: item.name,
+          sets: Array.from({ length: count }, (_, setIndex) => {
+            const source = previous[setIndex] || previous[previous.length - 1] || {};
+            return {
+              id: `${id}-e${exerciseIndex}-s${setIndex}`,
+              weight: source.weight ?? null,
+              reps: source.reps ?? null,
+              distance: source.distance ?? null,
+              durationSec: source.durationSec ?? null,
+            };
+          }),
+        };
+      }),
+    };
+  });
+  for (const routine of routines) {
+    for (const workout of workouts) {
+      if (!workout.routineId && workout.name === routine.name) workout.routineId = routine.id;
+    }
+  }
+  const activeWorkout = data.activeWorkout
+    ? { ...data.activeWorkout, notes: data.activeWorkout.notes || "", routineId: data.activeWorkout.routineId || null }
+    : null;
+  const { templates, ...rest } = data;
+  return {
+    ...rest,
+    version: 3,
+    workouts,
+    routines,
+    activeWorkout,
+    settings: { ...data.settings, weeklyGoal: data.settings?.weeklyGoal || 3 },
+  };
 }
 
 function withDefaults(data) {
@@ -189,6 +261,13 @@ function loadState() {
   }
 
   const startVersion = data.version;
+  if (startVersion < DATA_VERSION) {
+    const original = startVersion === 1 && !raw ? storage.get(LEGACY_KEY) : raw;
+    if (original) {
+      pendingBackup = { key: `${DATA_KEY}-sicherung-v${startVersion}-${Date.now()}`, value: original };
+      writePendingBackup();
+    }
+  }
   while (data.version < DATA_VERSION) {
     data = MIGRATIONS[data.version](data);
   }
@@ -201,8 +280,24 @@ function loadState() {
   return loaded;
 }
 
+// A migration overwrites the stored data only after a safety copy of the old version has been written.
+let pendingBackup = null;
+
+function writePendingBackup() {
+  if (!pendingBackup) return true;
+  if (storage.set(pendingBackup.key, pendingBackup.value)) {
+    pendingBackup = null;
+    return true;
+  }
+  showBanner(
+    "Für das Update konnte keine Sicherheitskopie angelegt werden, weil der Speicher voll ist. Deine bisherigen Daten bleiben unverändert gespeichert. Exportiere unter „Mehr“ ein Backup und schaffe Platz."
+  );
+  return false;
+}
+
 function saveState() {
   if (!storage.available) return false;
+  if (!writePendingBackup()) return false;
   const ok = storage.set(DATA_KEY, JSON.stringify(state));
   if (!ok) {
     showBanner("Speichern fehlgeschlagen: Der Browser-Speicher ist voll oder gesperrt. Neue Eingaben gehen beim Schließen verloren.");
@@ -328,12 +423,18 @@ function getElapsedMs(workout, now = Date.now()) {
   return Math.max(0, end - workout.startedAt - (workout.pausedMs || 0));
 }
 
+function copySetValues(set) {
+  return { weight: set.weight ?? null, reps: set.reps ?? null, distance: set.distance ?? null, durationSec: set.durationSec ?? null };
+}
+
 function startWorkout(template = null) {
   const now = Date.now();
   const name = workoutNameInput.value.trim();
   const workout = {
     id: createId("w"),
     name: name || template?.name || formatWorkoutDefaultName(now),
+    routineId: template?.id || null,
+    notes: "",
     startedAt: now,
     pausedAt: null,
     pausedMs: 0,
@@ -342,11 +443,11 @@ function startWorkout(template = null) {
     restTotalSec: null,
   };
   for (const item of template?.exercises || []) {
-    const exercise = { id: createId("e"), name: item.name, sets: [] };
-    for (let index = 0; index < item.setCount; index += 1) {
-      exercise.sets.push({ id: createId("s"), ...getPrefillValues(workout, exercise, index), done: false, planned: true });
-    }
-    workout.exercises.push(exercise);
+    workout.exercises.push({
+      id: createId("e"),
+      name: item.name,
+      sets: item.sets.map((set) => ({ id: createId("s"), ...copySetValues(set), done: false, planned: true })),
+    });
   }
   state.activeWorkout = workout;
   workoutNameInput.value = "";
@@ -389,6 +490,8 @@ function finalizeActiveWorkout() {
   const finished = {
     id: workout.id,
     name: workout.name,
+    routineId: workout.routineId || null,
+    notes: workout.notes || "",
     startedAt: workout.startedAt,
     endedAt: now,
     pausedMs: workout.pausedMs,
@@ -1230,14 +1333,21 @@ templateForm.addEventListener("submit", (event) => {
     return;
   }
   const template = {
-    id: createId("t"),
+    id: createId("r"),
     name,
+    notes: "",
     createdAt: Date.now(),
-    exercises: workout.exercises.map((exercise) => ({ name: exercise.name, setCount: Math.max(1, getRealSets(exercise).length) })),
+    exercises: workout.exercises
+      .filter((exercise) => getRealSets(exercise).length > 0)
+      .map((exercise) => ({
+        id: createId("e"),
+        name: exercise.name,
+        sets: getRealSets(exercise).map((set) => ({ id: createId("s"), ...copySetValues(set) })),
+      })),
   };
-  const existingIndex = state.templates.findIndex((item) => item.name.toLowerCase() === name.toLowerCase());
-  if (existingIndex >= 0) state.templates[existingIndex] = { ...template, id: state.templates[existingIndex].id };
-  else state.templates.push(template);
+  const existingIndex = state.routines.findIndex((item) => item.name.toLowerCase() === name.toLowerCase());
+  if (existingIndex >= 0) state.routines[existingIndex] = { ...template, id: state.routines[existingIndex].id, createdAt: state.routines[existingIndex].createdAt };
+  else state.routines.push(template);
   templateDialog.close();
   if (workout.id === summaryWorkoutId && summaryDialog.open) {
     summaryTemplateBtn.disabled = true;
@@ -1256,8 +1366,8 @@ const templatesSection = document.getElementById("templates-section");
 function renderTemplates() {
   templatesSection.hidden = Boolean(state.activeWorkout);
   templateList.innerHTML = "";
-  templatesEmpty.hidden = state.templates.length > 0;
-  for (const template of state.templates) {
+  templatesEmpty.hidden = state.routines.length > 0;
+  for (const template of state.routines) {
     const item = document.createElement("li");
     item.className = "template-item";
     const text = document.createElement("div");
@@ -1287,7 +1397,7 @@ function renderTemplates() {
         danger: true,
       });
       if (!ok) return;
-      state.templates = state.templates.filter((item) => item.id !== template.id);
+      state.routines = state.routines.filter((item) => item.id !== template.id);
       persistAndRender();
     });
 
@@ -2150,7 +2260,7 @@ function renderDataTab() {
   document.getElementById("backup-status").textContent = state.settings.lastExportAt
     ? `Zuletzt exportiert: ${formatDateTime(state.settings.lastExportAt)}`
     : "Noch kein Backup exportiert.";
-  const counts = `${state.workouts.length} Workouts, ${Object.keys(state.exercises).length} Übungen, ${state.templates.length} Vorlagen · Datenformat Version ${state.version}`;
+  const counts = `${state.workouts.length} Workouts, ${Object.keys(state.exercises).length} Übungen, ${state.routines.length} Vorlagen · Datenformat Version ${state.version}`;
   document.getElementById("storage-info").textContent = storage.available
     ? `Lokaler Speicher aktiv. Gespeichert: ${counts}.`
     : `Lokaler Speicher nicht verfügbar – Daten gehen beim Schließen verloren. Aktuell: ${counts}.`;
@@ -2216,9 +2326,9 @@ function validateBackup(parsed) {
       !Array.isArray(parsed.exercises) &&
       Object.values(parsed.exercises).every((exercise) => exercise && EXERCISE_TYPES[exercise.type]));
   if (!exercisesValid) return { error: "Die Datei enthält ungültige Übungstypen und wurde nicht importiert." };
-  const templatesValid =
-    parsed.templates === undefined ||
-    (Array.isArray(parsed.templates) && parsed.templates.every((template) => template && typeof template.name === "string" && Array.isArray(template.exercises)));
+  const listValid = (list) =>
+    list === undefined || (Array.isArray(list) && list.every((item) => item && typeof item.name === "string" && Array.isArray(item.exercises)));
+  const templatesValid = listValid(parsed.templates) && listValid(parsed.routines);
   if (!templatesValid) return { error: "Die Datei enthält ungültige Vorlagen und wurde nicht importiert." };
   if (parsed.activeWorkout != null && !isValidWorkout(parsed.activeWorkout)) return { error: INVALID_BACKUP };
   return { data: parsed };
