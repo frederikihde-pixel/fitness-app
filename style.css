@@ -1592,3 +1592,14 @@ button:disabled {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
+
+/* ---------- Data tab and touch targets ---------- */
+
+.card-text {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.chip {
+  min-height: 44px;
+}

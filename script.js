@@ -145,6 +145,12 @@ function migrateV1toV2(data) {
   return next;
 }
 
+function withDefaults(data) {
+  const { app, exportedAt, ...rest } = data;
+  const defaults = emptyState();
+  return { ...defaults, ...rest, settings: { ...defaults.settings, ...rest.settings } };
+}
+
 function backupCorruptData(raw) {
   storage.set(`${DATA_KEY}-defekt-${Date.now()}`, raw);
 }
@@ -187,7 +193,7 @@ function loadState() {
     data = MIGRATIONS[data.version](data);
   }
 
-  const loaded = { ...emptyState(), ...data, settings: { ...emptyState().settings, ...data.settings } };
+  const loaded = withDefaults(data);
   if (startVersion !== loaded.version) {
     state = loaded;
     saveState();
@@ -2128,6 +2134,140 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(renderStatistik, 150);
 });
 
+// ---------- Backup: export and import ----------
+
+const APP_ID = "fitness-tracker";
+const exportBtn = document.getElementById("export-btn");
+const importFile = document.getElementById("import-file");
+const importError = document.getElementById("import-error");
+
+function formatDateTime(timestamp) {
+  const date = new Date(timestamp);
+  return `${date.toLocaleDateString("de-DE")}, ${date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr`;
+}
+
+function renderDataTab() {
+  document.getElementById("backup-status").textContent = state.settings.lastExportAt
+    ? `Zuletzt exportiert: ${formatDateTime(state.settings.lastExportAt)}`
+    : "Noch kein Backup exportiert.";
+  const counts = `${state.workouts.length} Workouts, ${Object.keys(state.exercises).length} Übungen, ${state.templates.length} Vorlagen · Datenformat Version ${state.version}`;
+  document.getElementById("storage-info").textContent = storage.available
+    ? `Lokaler Speicher aktiv. Gespeichert: ${counts}.`
+    : `Lokaler Speicher nicht verfügbar – Daten gehen beim Schließen verloren. Aktuell: ${counts}.`;
+}
+
+function exportData() {
+  const payload = { app: APP_ID, exportedAt: Date.now(), ...state };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `training-backup-${toDateStr(new Date())}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  state.settings.lastExportAt = payload.exportedAt;
+  saveState();
+  renderDataTab();
+  showToast("Backup-Datei erstellt");
+}
+
+const INVALID_BACKUP = "Die Datei ist kein gültiges Backup dieser App.";
+
+function isValidNumberField(value) {
+  return value === undefined || value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
+function isValidSet(set) {
+  return Boolean(set) && typeof set === "object" && ["weight", "reps", "distance", "durationSec"].every((key) => isValidNumberField(set[key]));
+}
+
+function isValidWorkout(workout) {
+  return (
+    Boolean(workout) &&
+    typeof workout.id === "string" &&
+    Number.isFinite(workout.startedAt) &&
+    Array.isArray(workout.exercises) &&
+    workout.exercises.every(
+      (exercise) => exercise && typeof exercise.name === "string" && exercise.name.trim() && Array.isArray(exercise.sets) && exercise.sets.every(isValidSet)
+    )
+  );
+}
+
+function validateBackup(parsed) {
+  if (Array.isArray(parsed)) {
+    const valid = parsed.length > 0 && parsed.every((entry) => entry && typeof entry.exercise === "string" && /^\d{4}-\d{2}-\d{2}$/.test(entry.date));
+    return valid ? { data: { version: 1, entries: parsed } } : { error: INVALID_BACKUP };
+  }
+  if (!parsed || typeof parsed !== "object") return { error: INVALID_BACKUP };
+  if (parsed.app !== undefined && parsed.app !== APP_ID) return { error: INVALID_BACKUP };
+  if (!Number.isInteger(parsed.version) || parsed.version < 1) return { error: INVALID_BACKUP };
+  if (parsed.version > DATA_VERSION) {
+    return { error: "Dieses Backup stammt aus einer neueren Version der App und kann hier nicht importiert werden." };
+  }
+  if (parsed.version === 1) return Array.isArray(parsed.entries) ? { data: parsed } : { error: INVALID_BACKUP };
+  if (!Array.isArray(parsed.workouts) || !parsed.workouts.every(isValidWorkout)) {
+    return { error: "Die Datei enthält ungültige Workout-Daten und wurde nicht importiert." };
+  }
+  const exercisesValid =
+    parsed.exercises === undefined ||
+    (typeof parsed.exercises === "object" &&
+      !Array.isArray(parsed.exercises) &&
+      Object.values(parsed.exercises).every((exercise) => exercise && EXERCISE_TYPES[exercise.type]));
+  if (!exercisesValid) return { error: "Die Datei enthält ungültige Übungstypen und wurde nicht importiert." };
+  const templatesValid =
+    parsed.templates === undefined ||
+    (Array.isArray(parsed.templates) && parsed.templates.every((template) => template && typeof template.name === "string" && Array.isArray(template.exercises)));
+  if (!templatesValid) return { error: "Die Datei enthält ungültige Vorlagen und wurde nicht importiert." };
+  if (parsed.activeWorkout != null && !isValidWorkout(parsed.activeWorkout)) return { error: INVALID_BACKUP };
+  return { data: parsed };
+}
+
+async function importData(file) {
+  importError.textContent = "";
+  if (file.size > 20 * 1024 * 1024) {
+    importError.textContent = "Die Datei ist zu groß für ein Backup dieser App.";
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    importError.textContent = "Die Datei konnte nicht gelesen werden. Bitte wähle eine JSON-Backup-Datei.";
+    return;
+  }
+  const { data, error } = validateBackup(parsed);
+  if (error) {
+    importError.textContent = error;
+    return;
+  }
+  let migrated = data;
+  while (migrated.version < DATA_VERSION) migrated = MIGRATIONS[migrated.version](migrated);
+  const imported = withDefaults(migrated);
+  const from = parsed.exportedAt ? ` vom ${formatDateTime(parsed.exportedAt)}` : "";
+  const ok = await confirmDialog(
+    `Backup${from} mit ${imported.workouts.length} Workouts importieren? Deine aktuellen Daten (${state.workouts.length} Workouts) werden ersetzt. Eine Sicherheitskopie bleibt im Browser gespeichert.`,
+    { confirmLabel: "Importieren", danger: true }
+  );
+  if (!ok) return;
+  storage.set(`${DATA_KEY}-vor-import-${Date.now()}`, JSON.stringify(state));
+  state = imported;
+  workoutViewOpen = false;
+  saveState();
+  renderAll();
+  syncWakeLock();
+  showToast(`Backup importiert: ${imported.workouts.length} Workouts`);
+}
+
+exportBtn.addEventListener("click", exportData);
+document.getElementById("import-btn").addEventListener("click", () => importFile.click());
+importFile.addEventListener("change", () => {
+  const file = importFile.files[0];
+  importFile.value = "";
+  if (file) importData(file);
+});
+
 // ---------- Wake Lock ----------
 
 const wakeLockSupported = "wakeLock" in navigator;
@@ -2197,6 +2337,7 @@ function renderAll() {
   renderHistory();
   if (detailDialog.open) renderDetail();
   renderStatistik();
+  renderDataTab();
 }
 
 function tick() {
@@ -2240,3 +2381,11 @@ if (state.activeWorkout?.restEndsAt && state.activeWorkout.restEndsAt < Date.now
 setInterval(tick, 250);
 renderAll();
 syncWakeLock();
+
+const canUseServiceWorker =
+  "serviceWorker" in navigator && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname));
+if (canUseServiceWorker) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
