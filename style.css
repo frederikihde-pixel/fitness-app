@@ -2425,3 +2425,82 @@ dialog.sheet-bottom {
 .routine-card {
   padding: 1.15rem 1.1rem 1.15rem 1.25rem;
 }
+
+/* ---------- Backup reminder, import hint, storage status, address ---------- */
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.notice-text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.notice-text strong {
+  color: var(--text);
+}
+
+.notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notice-actions .btn {
+  min-height: 44px;
+  font-size: 0.92rem;
+}
+
+.notice-inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  border-style: dashed;
+  background: transparent;
+}
+
+.notice-inline .btn {
+  min-height: 44px;
+  font-size: 0.92rem;
+}
+
+.storage-card {
+  gap: 0.75rem;
+}
+
+.persist-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.persist-status {
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.persist-status.is-safe {
+  color: var(--accent);
+}
+
+.app-address {
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}

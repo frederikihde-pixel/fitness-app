@@ -608,6 +608,7 @@ function saveAndFinish() {
   const snapshot = JSON.stringify(state.activeWorkout);
   const finished = finalizeActiveWorkout();
   finishUndo = { workoutId: finished.id, active: snapshot };
+  requestPersistence();
   if (finishDialog.open) finishDialog.close();
   trainingView = "start";
   renderAll();
@@ -1752,7 +1753,19 @@ function makeIconButton(icon, label, onClick) {
   return button;
 }
 
+function renderStartNotices() {
+  const reminder = getBackupReminder();
+  backupBanner.hidden = !reminder || backupBannerHidden;
+  if (reminder) {
+    document.getElementById("backup-banner-text").textContent = state.settings.lastExportAt
+      ? `Letzte Sicherung ${formatDaysAgo(state.settings.lastExportAt)}, seitdem ${reminder.newCount} neue Workouts.`
+      : `${reminder.newCount} Workouts liegen nur in diesem Browser.`;
+  }
+  importHint.hidden = !(startedEmpty && isAppEmpty());
+}
+
 function renderRoutines() {
+  renderStartNotices();
   const last = getLastWorkout();
   repeatLastBtn.hidden = !last || Boolean(state.activeWorkout);
   const newIsPrimary = state.routines.length === 0 && !state.activeWorkout;
@@ -2801,9 +2814,12 @@ function renderDataTab() {
   document.getElementById("goal-value").textContent = String(getWeeklyGoal());
   renderManageList();
   document.getElementById("backup-status").textContent = state.settings.lastExportAt
-    ? `Zuletzt exportiert: ${formatDateTime(state.settings.lastExportAt)}`
-    : "Noch kein Backup exportiert.";
-  const counts = `${state.workouts.length} Workouts · ${Object.keys(state.exercises).length} Übungen · ${state.routines.length} in Meine Workouts`;
+    ? `Zuletzt gesichert: ${formatDaysAgo(state.settings.lastExportAt)}`
+    : "Noch nicht gesichert.";
+  renderPersistStatus();
+  document.getElementById("app-address").textContent = getAppAddress();
+  const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+  const counts = `${plural(state.workouts.length, "Workout", "Workouts")} · ${plural(Object.keys(state.exercises).length, "Übung", "Übungen")} · ${state.routines.length} in Meine Workouts`;
   let safetyCopies = 0;
   try {
     safetyCopies = Object.keys(localStorage).filter((key) => key.startsWith(`${DATA_KEY}-sicherung-`) || key.startsWith(`${DATA_KEY}-vor-import-`)).length;
@@ -2815,20 +2831,52 @@ function renderDataTab() {
     : `Kein lokaler Speicher – Daten gehen beim Schließen verloren. ${counts}.`;
 }
 
-function exportData() {
-  const payload = { app: APP_ID, exportedAt: Date.now(), ...state };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+function downloadFile(content, fileName) {
+  const blob = new Blob([content], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `training-backup-${toDateStr(new Date())}.json`;
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  state.settings.lastExportAt = payload.exportedAt;
+}
+
+function markExported(timestamp) {
+  state.settings.lastExportAt = timestamp;
+  backupBannerHidden = false;
   saveState();
-  renderDataTab();
+  renderAll();
+}
+
+function isPhone() {
+  return Boolean(window.matchMedia?.("(pointer: coarse)").matches);
+}
+
+// Phones get the share sheet (save to Files, Drive, mail, ...); everything else downloads the file.
+async function exportData() {
+  const exportedAt = Date.now();
+  const content = JSON.stringify({ app: APP_ID, exportedAt, ...state }, null, 2);
+  const fileName = `training-backup-${toDateStr(new Date(exportedAt))}.json`;
+  if (isPhone() && navigator.share && navigator.canShare && typeof File === "function") {
+    const file = new File([content], fileName, { type: "application/json" });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "Training-Backup" });
+        markExported(exportedAt);
+        showToast("Backup gesichert");
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+        downloadFile(content, fileName);
+        markExported(exportedAt);
+        showToast("Backup-Datei erstellt");
+      }
+      return;
+    }
+  }
+  downloadFile(content, fileName);
+  markExported(exportedAt);
   showToast("Backup-Datei erstellt");
 }
 
@@ -2883,29 +2931,38 @@ function validateBackup(parsed) {
   return { data: parsed };
 }
 
+function isAppEmpty() {
+  return state.workouts.length === 0 && state.routines.length === 0 && !state.activeWorkout;
+}
+
+function reportImportError(message) {
+  importError.textContent = message;
+  if (currentTab !== "mehr") showToast(message);
+}
+
 async function importData(file) {
   importError.textContent = "";
   if (file.size > 20 * 1024 * 1024) {
-    importError.textContent = "Die Datei ist zu groß für ein Backup dieser App.";
+    reportImportError("Die Datei ist zu groß für ein Backup dieser App.");
     return;
   }
   let parsed;
   try {
     parsed = JSON.parse(await file.text());
   } catch {
-    importError.textContent = "Die Datei konnte nicht gelesen werden. Bitte wähle eine JSON-Backup-Datei.";
+    reportImportError("Die Datei konnte nicht gelesen werden. Bitte wähle eine JSON-Backup-Datei.");
     return;
   }
   const { data, error } = validateBackup(parsed);
   if (error) {
-    importError.textContent = error;
+    reportImportError(error);
     return;
   }
   let migrated = data;
   while (migrated.version < DATA_VERSION) migrated = MIGRATIONS[migrated.version](migrated);
   const imported = withDefaults(migrated);
   const from = parsed.exportedAt ? ` vom ${formatDateTime(parsed.exportedAt)}` : "";
-  const ok = await confirmDialog(
+  const ok = isAppEmpty() || await confirmDialog(
     `Backup${from} mit ${imported.workouts.length} Workouts importieren? Deine aktuellen Daten (${state.workouts.length} Workouts) werden ersetzt. Eine Sicherheitskopie bleibt im Browser gespeichert.`,
     { confirmLabel: "Importieren", danger: true }
   );
@@ -2917,6 +2974,7 @@ async function importData(file) {
   renderAll();
   syncWakeLock();
   showToast(`Backup importiert: ${imported.workouts.length} Workouts`);
+  if (state.workouts.length > 0) requestPersistence();
 }
 
 exportBtn.addEventListener("click", exportData);
@@ -3520,6 +3578,95 @@ function renderCueSettings() {
   document.getElementById("cue-vibrate-sub").textContent = navigator.vibrate ? "" : "Dieser Browser kann nicht vibrieren";
 }
 
+// ---------- Robust storage: persistence, backup reminder, address ----------
+
+const backupBanner = document.getElementById("backup-banner");
+const importHint = document.getElementById("import-hint");
+const startedEmpty = state.workouts.length === 0 && state.routines.length === 0 && !state.activeWorkout;
+let backupBannerHidden = false;
+let persistState = "unknown";
+
+function calendarDaysSince(timestamp) {
+  return Math.round((startOfDay(Date.now()) - startOfDay(timestamp)) / DAY_MS);
+}
+
+function formatDaysAgo(timestamp) {
+  const days = calendarDaysSince(timestamp);
+  if (days <= 0) return "heute";
+  if (days === 1) return "gestern";
+  return `vor ${days} Tagen`;
+}
+
+// Reminder once at least 7 days have passed since the last backup and 3 or more workouts were added.
+// Without any backup yet, the first saved workout marks the start.
+function getBackupReminder() {
+  const savedAt = (workout) => workout.endedAt ?? workout.startedAt;
+  const lastExport = state.settings.lastExportAt || null;
+  const newWorkouts = state.workouts.filter((workout) => lastExport === null || savedAt(workout) > lastExport);
+  if (newWorkouts.length < 3) return null;
+  const since = lastExport ?? Math.min(...newWorkouts.map(savedAt));
+  return calendarDaysSince(since) >= 7 ? { newCount: newWorkouts.length } : null;
+}
+
+async function refreshPersistStatus() {
+  if (!navigator.storage?.persisted) {
+    persistState = "unsupported";
+  } else {
+    try {
+      persistState = (await navigator.storage.persisted()) ? "granted" : "denied";
+    } catch {
+      persistState = "denied";
+    }
+  }
+  renderPersistStatus();
+}
+
+async function requestPersistence() {
+  if (!navigator.storage?.persist || persistState === "granted") return;
+  try {
+    persistState = (await navigator.storage.persist()) ? "granted" : "denied";
+  } catch {
+    persistState = "denied";
+  }
+  renderPersistStatus();
+}
+
+function renderPersistStatus() {
+  const status = document.getElementById("persist-status");
+  const granted = persistState === "granted";
+  status.textContent = granted ? "Dauerhaft geschützt" : "Kann vom Browser gelöscht werden";
+  status.classList.toggle("is-safe", granted);
+  let sub = "";
+  if (persistState === "unsupported") sub = "Dieser Browser bietet keinen dauerhaften Schutz. Sichere regelmäßig.";
+  else if (!granted) sub = "Der Browser entscheidet selbst. Als App auf dem Startbildschirm klappt es eher.";
+  document.getElementById("persist-sub").textContent = sub;
+}
+
+function getAppAddress() {
+  return location.origin && location.origin !== "null" ? `${location.origin}${location.pathname}` : location.href;
+}
+
+document.getElementById("backup-banner-btn").addEventListener("click", exportData);
+document.getElementById("backup-banner-later").addEventListener("click", () => {
+  backupBannerHidden = true;
+  renderStartNotices();
+});
+document.getElementById("import-hint-btn").addEventListener("click", () => importFile.click());
+document.getElementById("copy-address-btn").addEventListener("click", async () => {
+  const address = getAppAddress();
+  try {
+    await navigator.clipboard.writeText(address);
+    showToast("Link kopiert");
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("app-address"));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    showToast("Link markiert – jetzt kopieren");
+  }
+});
+
 // ---------- Wake Lock ----------
 
 const wakeLockSupported = "wakeLock" in navigator;
@@ -3634,6 +3781,7 @@ if (state.activeWorkout?.restEndsAt && state.activeWorkout.restEndsAt < Date.now
 }
 setInterval(tick, 250);
 renderAll();
+refreshPersistStatus();
 syncWakeLock();
 
 const canUseServiceWorker =

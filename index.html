@@ -31,6 +31,14 @@
           <button type="button" id="open-workout-btn" class="btn btn-primary btn-block">Fortsetzen</button>
         </div>
 
+        <div id="backup-banner" class="notice" role="status" hidden>
+          <p class="notice-text"><strong>Zeit für ein Backup.</strong> <span id="backup-banner-text"></span></p>
+          <div class="notice-actions">
+            <button type="button" id="backup-banner-btn" class="btn btn-secondary">Backup erstellen</button>
+            <button type="button" id="backup-banner-later" class="link-btn">Später</button>
+          </div>
+        </div>
+
         <section id="routines-section" class="start-section" aria-labelledby="routines-heading">
           <h2 id="routines-heading">Meine Workouts</h2>
           <ul id="routine-list" class="routine-list"></ul>
@@ -43,6 +51,11 @@
         <div class="start-actions">
           <button type="button" id="repeat-last-btn" class="btn btn-secondary btn-block" hidden>Letztes Training wiederholen</button>
           <button type="button" id="new-workout-btn" class="btn btn-secondary btn-block btn-dashed">+ Neues Workout</button>
+        </div>
+
+        <div id="import-hint" class="notice notice-inline" hidden>
+          <p class="notice-text">Schon Daten?</p>
+          <button type="button" id="import-hint-btn" class="btn btn-secondary">Backup importieren</button>
         </div>
       </div>
 
@@ -245,8 +258,19 @@
       </div>
 
       <h2>Speicher</h2>
+      <div class="card storage-card">
+        <div class="persist-row">
+          <span id="persist-status" class="persist-status"></span>
+          <span id="persist-sub" class="settings-sub"></span>
+        </div>
+        <p id="storage-info" class="card-text muted-small"></p>
+      </div>
+
+      <h2>Adresse</h2>
       <div class="card">
-        <p id="storage-info" class="card-text"></p>
+        <p class="card-text">Deine Daten gehören zu dieser Adresse. Öffne die App immer über denselben Link.</p>
+        <p id="app-address" class="app-address"></p>
+        <button type="button" id="copy-address-btn" class="btn btn-secondary btn-block">Link kopieren</button>
       </div>
     </section>
   </main>
